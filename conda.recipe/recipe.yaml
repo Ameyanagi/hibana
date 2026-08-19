@@ -1,0 +1,42 @@
+context:
+  version: "0.0.0"
+
+package:
+  name: mojo-hibana
+  version: ${{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script:
+    - mojo precompile src/hibana -o ${{ PREFIX }}/lib/mojo/hibana.mojoc
+
+requirements:
+  build:
+    - mojo-compiler =1.0.0
+  host:
+    - mojo-compiler =1.0.0
+  run:
+    - ${{ pin_compatible('mojo-compiler') }}
+
+tests:
+  - script:
+      - mojo run test_package.mojo
+    files:
+      recipe:
+        - test_package.mojo
+
+about:
+  homepage: https://github.com/Ameyanagi/hibana
+  repository: https://github.com/Ameyanagi/hibana
+  license: MIT OR Apache-2.0
+  license_file:
+    - LICENSE-MIT
+    - LICENSE-APACHE
+  summary: High-performance fuzzy matching for Mojo.
+
+extra:
+  maintainers:
+    - Ameyanagi
