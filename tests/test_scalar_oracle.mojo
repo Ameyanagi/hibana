@@ -6,6 +6,10 @@ from std.collections import List
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 
+comptime _RANDOM_SEED = UInt64(0x6A09E667F3BCC909)
+comptime _RANDOM_CASE_COUNT = 2_000
+
+
 struct _OracleResult(Copyable):
     var matched: Bool
     var score: Int
@@ -116,13 +120,39 @@ def _binary_text(code: Int, length: Int) -> String:
     return text^
 
 
+def _next_xorshift64(mut state: UInt64) -> UInt64:
+    # Reproducible xorshift64 recurrence: x ^= x << 13; x ^= x >> 7;
+    # x ^= x << 17, starting from _RANDOM_SEED.
+    state ^= state << 13
+    state ^= state >> 7
+    state ^= state << 17
+    return state
+
+
+def _random_ternary_text(mut state: UInt64, length: Int) -> String:
+    var text = String()
+    for _ in range(length):
+        var scalar = _next_xorshift64(state) % 3
+        if scalar == 0:
+            text += "a"
+        elif scalar == 1:
+            text += "b"
+        else:
+            text += "c"
+    return text^
+
+
 def _assert_oracle_equal(
     actual: MatchResult,
     expected: _OracleResult,
     pattern: StringSlice,
     candidate: StringSlice,
 ) raises:
-    if actual.matched != expected.matched or actual.score != expected.score:
+    if (
+        actual.matched != expected.matched
+        or actual.score != expected.score
+        or len(actual.positions) != len(expected.positions)
+    ):
         raise Error(
             "oracle mismatch for pattern '",
             pattern,
@@ -130,9 +160,15 @@ def _assert_oracle_equal(
             candidate,
             "'",
         )
-    assert_equal(len(actual.positions), len(expected.positions))
     for index in range(len(actual.positions)):
-        assert_equal(actual.positions[index], expected.positions[index])
+        if actual.positions[index] != expected.positions[index]:
+            raise Error(
+                "oracle mismatch for pattern '",
+                pattern,
+                "' and candidate '",
+                candidate,
+                "'",
+            )
 
 
 def test_known_oracle_states_are_independent_and_canonical() raises:
@@ -173,6 +209,29 @@ def test_exhaustive_small_alphabet_matches_both_oracles() raises:
                     _assert_oracle_equal(actual, expected, pattern, candidate)
                     _assert_oracle_equal(reference_result, expected, pattern, candidate)
     assert_equal(pair_count, 945)
+
+
+def test_fixed_seed_random_cases_match_both_oracles() raises:
+    var random_state = _RANDOM_SEED
+    for case_index in range(_RANDOM_CASE_COUNT):
+        var pattern_length = 0
+        var candidate_length = 0
+        if case_index < 50:
+            # Enumerate all 5 × 10 length pairs before drawing random lengths.
+            pattern_length = case_index % 5
+            candidate_length = case_index // 5
+        else:
+            pattern_length = Int(_next_xorshift64(random_state) % 5)
+            candidate_length = Int(_next_xorshift64(random_state) % 10)
+
+        var pattern = _random_ternary_text(random_state, pattern_length)
+        var candidate = _random_ternary_text(random_state, candidate_length)
+        var prepared_pattern = Pattern(pattern)
+        var actual = Matcher(prepared_pattern).match(candidate)
+        var reference_result = reference_match(prepared_pattern, candidate)
+        var expected = _brute_force_match(pattern, candidate)
+        _assert_oracle_equal(actual, expected, pattern, candidate)
+        _assert_oracle_equal(reference_result, expected, pattern, candidate)
 
 
 def main() raises:

@@ -198,6 +198,35 @@ def test_reference_transition_limit_is_reported() raises:
         _ = reference_match(Pattern("aa"), candidate)
 
 
+def test_production_match_has_no_reference_transition_limit() raises:
+    var candidate = String()
+    for _ in range(4_000):
+        candidate += "a"
+    var result = Matcher("aa").match(candidate)
+    assert_true(result.matched)
+    assert_equal(result.score, 225)
+    assert_equal(len(result.positions), 2)
+    assert_equal(result.positions[0], 0)
+    assert_equal(result.positions[1], 1)
+
+
+def test_production_match_has_no_reference_tie_break_limit() raises:
+    var pattern = String()
+    var candidate = String()
+    for _ in range(10):
+        pattern += "a"
+    for _ in range(1_300):
+        candidate += "a"
+    var result = Matcher(pattern).match(candidate)
+    assert_true(result.matched)
+    assert_equal(result.score, 1_225)
+    assert_equal(len(result.positions), 10)
+    assert_equal(result.positions[0], 0)
+    assert_equal(result.positions[9], 9)
+    for index in range(1, len(result.positions)):
+        assert_true(result.positions[index - 1] < result.positions[index])
+
+
 def test_production_match_has_no_reference_state_table_limit() raises:
     var pattern = String()
     var candidate = String()

@@ -40,16 +40,18 @@ The first correctness-first scalar slice is available for development:
 from hibana import Matcher
 
 
-def main() raises:
+def main():
     var result = Matcher("kmr").match("kamera")
 ```
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
 zero-based Unicode scalar `positions`. The current slice is exact and
 case-sensitive; it is experimental and not yet a stable release.
-`Matcher.match` raises when the polynomial reference oracle rejects a workload
-beyond its documented state, transition, tie-break, or score resource bounds.
-See the v0.1 plan for exact limits.
+`Matcher.match` is total and deterministic; a non-match is reported with
+`matched == false`. For pattern length `P` and candidate length `C`, the
+production path uses `O(P*C)` time and memory with no artificial resource
+limits. The bounded exhaustive dynamic program survives only as an internal
+test oracle and is not used by the production path.
 
 The exported structs are mutable Mojo value types. Matcher construction
 snapshots its canonical prepared pattern; caller mutation of a returned result
