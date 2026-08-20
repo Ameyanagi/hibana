@@ -1,4 +1,4 @@
-"""Correctness-first scalar fuzzy matching."""
+"""Linear-time production scalar fuzzy matching."""
 
 from std.collections import List
 
@@ -6,185 +6,109 @@ from ..pattern import Pattern, _scalar_values
 from ..result import MatchResult
 
 
-comptime _MAX_REFERENCE_CELLS = 1_000_000
-comptime _MAX_REFERENCE_TRANSITIONS = 25_000_000
-comptime _MAX_REFERENCE_TIE_STEPS = 100_000_000
-comptime _SCORE_MAGNITUDE_LIMIT = 1_000_000_000
+comptime _UNREACHABLE = Int.MIN // 4
 
 
-def _checked_reference_cells(pattern_count: Int, candidate_count: Int) raises -> Int:
-    """Validate every product used by the bounded reference implementation."""
-    # The score is at most 125 per pattern scalar and its negative magnitude is
-    # bounded by the candidate length. Prove those arithmetic operations remain
-    # inside the deliberately conservative score interval before evaluating one.
-    if pattern_count > _SCORE_MAGNITUDE_LIMIT // 125:
-        raise Error("pattern exceeds the scalar reference score limit")
-    if candidate_count > _SCORE_MAGNITUDE_LIMIT:
-        raise Error("candidate exceeds the scalar reference score limit")
-
-    # Check division before multiplication so allocation and flattened indices
-    # cannot overflow. Every later flattened index is strictly less than cells.
-    if candidate_count > _MAX_REFERENCE_CELLS // pattern_count:
-        raise Error("match exceeds the scalar reference state-table limit")
-    var cells = pattern_count * candidate_count
-
-    # The DP examines at most pattern_count * candidate_count^2 predecessor
-    # transitions. Lexicographic ties may walk at most pattern_count positions.
-    # Check both products by division rather than constructing an overflowing
-    # estimate.
-    if pattern_count > 1:
-        if candidate_count > _MAX_REFERENCE_TRANSITIONS // cells:
-            raise Error("match exceeds the scalar reference transition limit")
-        var transitions = cells * candidate_count
-        if pattern_count > _MAX_REFERENCE_TIE_STEPS // transitions:
-            raise Error("match exceeds the scalar reference tie-break limit")
-    return cells
+def _transition(previous: Int, current: Int) -> Int:
+    var gap = current - previous - 1
+    if gap == 0:
+        return 125
+    return 100 - gap
 
 
-def _score_positions(positions: List[Int]) -> Int:
-    """Score a complete subsequence; higher values rank first.
+def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
+    """Return the best exact-scalar subsequence match in ``O(P*C)`` time.
 
-    Each matched scalar contributes 100 points. Adjacent matches receive 25
-    points, while leading and internal gaps cost one point per scalar.
-    """
-    if len(positions) == 0:
-        return 0
-
-    var score = len(positions) * 100 - positions[0]
-    for index in range(1, len(positions)):
-        var gap = positions[index] - positions[index - 1] - 1
-        if gap == 0:
-            score += 25
-        else:
-            score -= gap
-    return score
-
-
-def _is_lexicographically_earlier(left: List[Int], right: List[Int]) -> Bool:
-    for index in range(len(left)):
-        if left[index] < right[index]:
-            return True
-        if left[index] > right[index]:
-            return False
-    return False
-
-
-def _path_is_earlier(
-    backpointers: List[Int],
-    width: Int,
-    level: Int,
-    left_end: Int,
-    right_end: Int,
-) -> Bool:
-    var left = List[Int](length=level + 1, fill=0)
-    var right = List[Int](length=level + 1, fill=0)
-    var left_cursor = left_end
-    var right_cursor = right_end
-    for reverse_index in range(level + 1):
-        var index = level - reverse_index
-        left[index] = left_cursor
-        right[index] = right_cursor
-        if index > 0:
-            left_cursor = backpointers[index * width + left_cursor]
-            right_cursor = backpointers[index * width + right_cursor]
-    return _is_lexicographically_earlier(left, right)
-
-
-def scalar_match(pattern: Pattern, candidate: StringSlice) raises -> MatchResult:
-    """Return the best exact-scalar subsequence match.
-
-    Dynamic programming considers every complete subsequence under the scoring
-    contract. Equal scores choose lexicographically earlier positions. This is
-    a reviewable reference algorithm, not the final performance path.
+    Backward dynamic-programming rows retain each optimal suffix score. A
+    forward greedy walk then chooses the first position that preserves that
+    optimum at every pattern index, yielding the lexicographically earliest
+    optimal position vector.
     """
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
     var candidate_scalars = _scalar_values(candidate)
-    if len(candidate_scalars) < len(pattern):
+    var pattern_count = len(pattern)
+    var candidate_count = len(candidate_scalars)
+    if pattern_count > candidate_count:
         return MatchResult.no_match()
 
-    var candidate_count = len(candidate_scalars)
-    var pattern_count = len(pattern)
-    var cell_count = _checked_reference_cells(pattern_count, candidate_count)
-    var unreachable = -_SCORE_MAGNITUDE_LIMIT - 1
-    var backpointers = List[Int](length=cell_count, fill=-1)
-    var previous = List[Int](length=candidate_count, fill=unreachable)
-
+    var suffix_scores = List[Int](
+        length=pattern_count * candidate_count, fill=_UNREACHABLE
+    )
+    var last_row_offset = (pattern_count - 1) * candidate_count
     for candidate_index in range(candidate_count):
-        if candidate_scalars[candidate_index] == pattern._scalars[0]:
-            previous[candidate_index] = 100 - candidate_index
+        if candidate_scalars[candidate_index] == pattern._scalars[pattern_count - 1]:
+            suffix_scores[last_row_offset + candidate_index] = 0
 
-    for pattern_index in range(1, pattern_count):
-        var current = List[Int](length=candidate_count, fill=unreachable)
-        for candidate_index in range(candidate_count):
+    for reverse_row in range(1, pattern_count):
+        var pattern_index = pattern_count - reverse_row - 1
+        var current_row_offset = pattern_index * candidate_count
+        var next_row_offset = current_row_offset + candidate_count
+        var running_gapped_max = _UNREACHABLE
+        for reverse_column in range(candidate_count):
+            var candidate_index = candidate_count - reverse_column - 1
+            var new_gapped_index = candidate_index + 2
+            if new_gapped_index < candidate_count:
+                var suffix = suffix_scores[next_row_offset + new_gapped_index]
+                if suffix != _UNREACHABLE:
+                    var adjusted_suffix = suffix - new_gapped_index
+                    if (
+                        running_gapped_max == _UNREACHABLE
+                        or adjusted_suffix > running_gapped_max
+                    ):
+                        running_gapped_max = adjusted_suffix
+
             if candidate_scalars[candidate_index] != pattern._scalars[pattern_index]:
                 continue
 
-            var best_predecessor = -1
-            var best_score = unreachable
-            for predecessor in range(candidate_index):
-                if previous[predecessor] == unreachable:
-                    continue
-                var gap = candidate_index - predecessor - 1
-                var transition = 100 - gap
-                if gap == 0:
-                    transition = 125
-                var score = previous[predecessor] + transition
-                if (
-                    best_predecessor < 0
-                    or score > best_score
-                    or (
-                        score == best_score
-                        and _path_is_earlier(
-                            backpointers,
-                            candidate_count,
-                            pattern_index - 1,
-                            predecessor,
-                            best_predecessor,
-                        )
-                    )
-                ):
-                    best_predecessor = predecessor
-                    best_score = score
+            var best_suffix = _UNREACHABLE
+            var adjacent_index = candidate_index + 1
+            if adjacent_index < candidate_count:
+                var adjacent_suffix = suffix_scores[next_row_offset + adjacent_index]
+                if adjacent_suffix != _UNREACHABLE:
+                    best_suffix = 125 + adjacent_suffix
 
-            if best_predecessor >= 0:
-                current[candidate_index] = best_score
-                backpointers[
-                    pattern_index * candidate_count + candidate_index
-                ] = best_predecessor
-        previous = current^
+            if running_gapped_max != _UNREACHABLE:
+                var gapped_suffix = running_gapped_max + 101 + candidate_index
+                if best_suffix == _UNREACHABLE or gapped_suffix > best_suffix:
+                    best_suffix = gapped_suffix
+            suffix_scores[current_row_offset + candidate_index] = best_suffix
 
-    var best_end = -1
-    var best_score = unreachable
+    var best_start = -1
+    var best_total = _UNREACHABLE
     for candidate_index in range(candidate_count):
-        if previous[candidate_index] == unreachable:
+        var suffix = suffix_scores[candidate_index]
+        if suffix == _UNREACHABLE:
             continue
-        if (
-            best_end < 0
-            or previous[candidate_index] > best_score
-            or (
-                previous[candidate_index] == best_score
-                and _path_is_earlier(
-                    backpointers,
-                    candidate_count,
-                    pattern_count - 1,
-                    candidate_index,
-                    best_end,
-                )
-            )
-        ):
-            best_end = candidate_index
-            best_score = previous[candidate_index]
+        var total = 100 - candidate_index + suffix
+        if best_start < 0 or total > best_total:
+            best_start = candidate_index
+            best_total = total
 
-    if best_end < 0:
+    if best_start < 0:
         return MatchResult.no_match()
 
     var positions = List[Int](length=pattern_count, fill=0)
-    for reverse_index in range(pattern_count):
-        var pattern_index = pattern_count - reverse_index - 1
-        positions[pattern_index] = best_end
-        if pattern_index > 0:
-            best_end = backpointers[pattern_index * candidate_count + best_end]
-    var score = _score_positions(positions)
-    return MatchResult(True, score, positions^)
+    positions[0] = best_start
+    for pattern_index in range(1, pattern_count):
+        var previous = positions[pattern_index - 1]
+        var required_suffix = suffix_scores[
+            (pattern_index - 1) * candidate_count + previous
+        ]
+        var found = False
+        var row_offset = pattern_index * candidate_count
+        for candidate_index in range(previous + 1, candidate_count):
+            var suffix = suffix_scores[row_offset + candidate_index]
+            if (
+                suffix == _UNREACHABLE
+                or candidate_scalars[candidate_index] != pattern._scalars[pattern_index]
+            ):
+                continue
+            if _transition(previous, candidate_index) + suffix == required_suffix:
+                positions[pattern_index] = candidate_index
+                found = True
+                break
+        debug_assert(found, "suffix DP must admit a reconstruction step")
+
+    return MatchResult(True, best_total, positions^)

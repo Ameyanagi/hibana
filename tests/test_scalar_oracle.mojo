@@ -1,6 +1,7 @@
 """Independent exhaustive oracle checks for the scalar matcher contract."""
 
-from hibana import Matcher, MatchResult
+from hibana import Matcher, MatchResult, Pattern
+from hibana.algorithms.reference import reference_match
 from std.collections import List
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -152,21 +153,25 @@ def test_known_oracle_states_are_independent_and_canonical() raises:
     assert_equal(tied.positions[2], 3)
 
 
-def test_exhaustive_small_alphabet_matches_brute_force_oracle() raises:
+def test_exhaustive_small_alphabet_matches_both_oracles() raises:
     # 15 patterns (lengths 0...3) × 63 candidates (lengths 0...5) = 945
-    # deterministic comparisons. The oracle enumerates every valid combination.
+    # three-way comparisons. The brute-force oracle enumerates every valid
+    # combination independently of both dynamic-programming implementations.
     var pair_count = 0
     for pattern_length in range(4):
         for pattern_code in range(1 << pattern_length):
             var pattern = _binary_text(pattern_code, pattern_length)
-            var matcher = Matcher(pattern)
+            var prepared_pattern = Pattern(pattern)
+            var matcher = Matcher(prepared_pattern)
             for candidate_length in range(6):
                 for candidate_code in range(1 << candidate_length):
                     pair_count += 1
                     var candidate = _binary_text(candidate_code, candidate_length)
                     var actual = matcher.match(candidate)
+                    var reference_result = reference_match(prepared_pattern, candidate)
                     var expected = _brute_force_match(pattern, candidate)
                     _assert_oracle_equal(actual, expected, pattern, candidate)
+                    _assert_oracle_equal(reference_result, expected, pattern, candidate)
     assert_equal(pair_count, 945)
 
 

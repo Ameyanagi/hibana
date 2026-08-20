@@ -23,6 +23,6 @@ struct Matcher(Copyable):
         """Build a matcher from an already prepared pattern."""
         self._pattern = pattern.copy()
 
-    def match(self, candidate: StringSlice) raises -> MatchResult:
-        """Match one candidate, rejecting unsafe reference resource sizes."""
+    def match(self, candidate: StringSlice) -> MatchResult:
+        """Return the best match, or the canonical non-match result."""
         return scalar_match(self._pattern, candidate)

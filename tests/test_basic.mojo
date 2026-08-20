@@ -1,4 +1,5 @@
 from hibana import Matcher, MatchResult, Pattern
+from hibana.algorithms.reference import reference_match
 from std.collections import List
 from std.testing import (
     TestSuite,
@@ -186,7 +187,7 @@ def test_reference_state_table_limit_is_reported_before_allocation() raises:
     for _ in range(1_001):
         candidate += "a"
     with assert_raises(contains="state-table limit"):
-        _ = Matcher(pattern).match(candidate)
+        _ = reference_match(Pattern(pattern), candidate)
 
 
 def test_reference_transition_limit_is_reported() raises:
@@ -194,7 +195,22 @@ def test_reference_transition_limit_is_reported() raises:
     for _ in range(4_000):
         candidate += "a"
     with assert_raises(contains="transition limit"):
-        _ = Matcher("aa").match(candidate)
+        _ = reference_match(Pattern("aa"), candidate)
+
+
+def test_production_match_has_no_reference_state_table_limit() raises:
+    var pattern = String()
+    var candidate = String()
+    for _ in range(1_000):
+        pattern += "a"
+    for _ in range(1_001):
+        candidate += "a"
+    var result = Matcher(pattern).match(candidate)
+    assert_true(result.matched)
+    assert_equal(result.score, 124_975)
+    assert_equal(len(result.positions), 1_000)
+    assert_equal(result.positions[0], 0)
+    assert_equal(result.positions[999], 999)
 
 
 def main() raises:
