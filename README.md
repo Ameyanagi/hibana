@@ -39,15 +39,17 @@ The first correctness-first scalar slice is available for development:
 ```mojo
 from hibana import Matcher
 
-var result = Matcher("kmr").match("kamera")
+
+def main() raises:
+    var result = Matcher("kmr").match("kamera")
 ```
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
 zero-based Unicode scalar `positions`. The current slice is exact and
-case-sensitive; it is experimental and not yet a stable release. Matching is
-fallible because the polynomial reference oracle rejects workloads beyond its
-documented state, transition, tie-break, and score bounds rather than risking
-overflow or unbounded allocation. See the v0.1 plan for exact limits.
+case-sensitive; it is experimental and not yet a stable release.
+`Matcher.match` raises when the polynomial reference oracle rejects a workload
+beyond its documented state, transition, tie-break, or score resource bounds.
+See the v0.1 plan for exact limits.
 
 The exported structs are mutable Mojo value types. Matcher construction
 snapshots its canonical prepared pattern; caller mutation of a returned result
