@@ -3,12 +3,15 @@
 No generated lookup data is currently committed.
 
 `tests/test_scalar_oracle.mojo` deterministically enumerates its complete
-two-symbol corpus at test runtime: every `{a,b}` pattern through length 3 and
-candidate through length 5. The test asserts all 945 pairs execute. Its oracle
-generates fixed-size candidate combinations in position-vector lexicographic
-order, retains the first equal-scoring path, and derives score independently
-from selected span, omitted slots, and adjacent-pair count. It uses no external
-dataset, random source, or generated committed artifact.
+mixed-case corpus at test runtime: every `{a,b,A}` pattern through length 3 and
+candidate through length 5. The test asserts all 14,560 pairs execute. A second
+2,000-case fixed-seed corpus draws from `{a,b,A,B,_,/,space}` and runs under
+both `Scheme.DEFAULT` and `Scheme.PATH`. Its oracle generates fixed-size
+candidate combinations in position-vector lexicographic order, retains the
+first equal-scoring path, and derives bonuses and the closed-form score
+independently of both dynamic programs. The exact-case bonus is applied only
+after selection. It uses no external dataset, nondeterministic random source,
+or generated committed artifact.
 
 Every future generated artifact must record:
 

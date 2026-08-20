@@ -1,6 +1,6 @@
 """Independent exhaustive oracle checks for the scalar matcher contract."""
 
-from hibana import CaseMode, Matcher, MatchResult, Pattern
+from hibana import CaseMode, Matcher, MatchResult, Pattern, Scheme
 from hibana.algorithms.reference import reference_match
 from std.collections import List
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -8,6 +8,14 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 comptime _RANDOM_SEED = UInt64(0x6A09E667F3BCC909)
 comptime _RANDOM_CASE_COUNT = 2_000
+
+comptime _ORACLE_WHITESPACE = 0
+comptime _ORACLE_DELIMITER = 1
+comptime _ORACLE_NON_WORD = 2
+comptime _ORACLE_LOWER = 3
+comptime _ORACLE_UPPER = 4
+comptime _ORACLE_DIGIT = 5
+comptime _ORACLE_WORD_OTHER = 6
 
 
 struct _OracleResult(Copyable):
@@ -53,8 +61,74 @@ def _oracle_folds_ascii(pattern_scalars: List[UInt32], case_mode: CaseMode) -> B
     )
 
 
-def _closed_form_score(positions: List[Int]) -> Int:
-    """Derive score from span, omitted slots, and adjacent pairs.
+def _oracle_char_class(scalar: UInt32, scheme: Scheme) -> Int:
+    if (
+        scalar == UInt32(32)
+        or scalar == UInt32(9)
+        or scalar == UInt32(10)
+        or scalar == UInt32(13)
+        or scalar == UInt32(11)
+        or scalar == UInt32(12)
+    ):
+        return _ORACLE_WHITESPACE
+    if scheme == Scheme.PATH and (scalar == UInt32(47) or scalar == UInt32(92)):
+        return _ORACLE_DELIMITER
+    if scheme == Scheme.DEFAULT and (
+        scalar == UInt32(47)
+        or scalar == UInt32(44)
+        or scalar == UInt32(58)
+        or scalar == UInt32(59)
+        or scalar == UInt32(124)
+    ):
+        return _ORACLE_DELIMITER
+    if scalar >= UInt32(48) and scalar <= UInt32(57):
+        return _ORACLE_DIGIT
+    if scalar >= UInt32(65) and scalar <= UInt32(90):
+        return _ORACLE_UPPER
+    if scalar >= UInt32(97) and scalar <= UInt32(122):
+        return _ORACLE_LOWER
+    if scalar >= UInt32(128):
+        return _ORACLE_WORD_OTHER
+    return _ORACLE_NON_WORD
+
+
+def _oracle_is_word_class(cls: Int) -> Bool:
+    return (
+        cls == _ORACLE_LOWER
+        or cls == _ORACLE_UPPER
+        or cls == _ORACLE_DIGIT
+        or cls == _ORACLE_WORD_OTHER
+    )
+
+
+def _oracle_bonus(prev_class: Int, cls: Int, scheme: Scheme) -> Int:
+    if not _oracle_is_word_class(cls):
+        return 50
+    if prev_class == _ORACLE_WHITESPACE:
+        return 60
+    if prev_class == _ORACLE_DELIMITER:
+        return 60 if scheme == Scheme.PATH else 55
+    if prev_class == _ORACLE_NON_WORD:
+        return 50
+    if prev_class == _ORACLE_LOWER and cls == _ORACLE_UPPER:
+        return 40
+    if prev_class != _ORACLE_DIGIT and cls == _ORACLE_DIGIT:
+        return 40
+    return 0
+
+
+def _oracle_bonuses(candidate_scalars: List[UInt32], scheme: Scheme) -> List[Int]:
+    var bonuses = List[Int]()
+    var prev_class = _ORACLE_WHITESPACE
+    for scalar in candidate_scalars:
+        var cls = _oracle_char_class(scalar, scheme)
+        bonuses.append(_oracle_bonus(prev_class, cls, scheme))
+        prev_class = cls
+    return bonuses^
+
+
+def _position_score(positions: List[Int], bonuses: List[Int]) -> Int:
+    """Derive the position-selecting score from one complete subsequence.
 
     This intentionally differs from the production transition/recomputation
     loops: every slot inside the first-to-last span is either matched or one
@@ -69,7 +143,49 @@ def _closed_form_score(positions: List[Int]) -> Int:
             adjacent_pairs += 1
     var occupied_span = positions[len(positions) - 1] - positions[0] + 1
     var internal_gaps = occupied_span - len(positions)
-    return len(positions) * 100 - positions[0] - internal_gaps + adjacent_pairs * 25
+    var score = (
+        len(positions) * 100
+        + bonuses[positions[0]]
+        - positions[0]
+        - internal_gaps
+        + adjacent_pairs * 25
+    )
+    for position in positions:
+        score += bonuses[position]
+    return score
+
+
+def _oracle_exact_case_score(
+    positions: List[Int],
+    raw_pattern_scalars: List[UInt32],
+    raw_candidate_scalars: List[UInt32],
+    folding_active: Bool,
+) -> Int:
+    if not folding_active:
+        return 0
+    for pattern_index in range(len(positions)):
+        if (
+            raw_pattern_scalars[pattern_index]
+            != raw_candidate_scalars[positions[pattern_index]]
+        ):
+            return 0
+    return 45
+
+
+def _closed_form_score(
+    positions: List[Int],
+    bonuses: List[Int],
+    raw_pattern_scalars: List[UInt32],
+    raw_candidate_scalars: List[UInt32],
+    folding_active: Bool,
+) -> Int:
+    """Apply the closed form and post-selection exact-case ranking bonus."""
+    return _position_score(positions, bonuses) + _oracle_exact_case_score(
+        positions,
+        raw_pattern_scalars,
+        raw_candidate_scalars,
+        folding_active,
+    )
 
 
 def _advance_lexicographic_combination(
@@ -92,11 +208,16 @@ def _brute_force_match(
     pattern: StringSlice,
     candidate: StringSlice,
     case_mode: CaseMode = CaseMode.SMART_ASCII,
+    scheme: Scheme = Scheme.DEFAULT,
 ) -> _OracleResult:
     """Enumerate candidate subsets without using Hibana implementation details."""
-    var pattern_scalars = _scalar_values(pattern)
-    var candidate_scalars = _scalar_values(candidate)
-    if _oracle_folds_ascii(pattern_scalars, case_mode):
+    var raw_pattern_scalars = _scalar_values(pattern)
+    var raw_candidate_scalars = _scalar_values(candidate)
+    var bonuses = _oracle_bonuses(raw_candidate_scalars, scheme)
+    var pattern_scalars = raw_pattern_scalars.copy()
+    var candidate_scalars = raw_candidate_scalars.copy()
+    var folding_active = _oracle_folds_ascii(raw_pattern_scalars, case_mode)
+    if folding_active:
         for index in range(len(pattern_scalars)):
             pattern_scalars[index] = _fold_ascii_scalar(pattern_scalars[index])
         for index in range(len(candidate_scalars)):
@@ -123,9 +244,10 @@ def _brute_force_match(
                 matches = False
                 break
         if matches:
-            var score = _closed_form_score(positions)
+            var score = _position_score(positions, bonuses)
             # Combinations arrive lexicographically. Retaining the first equal
-            # score implements the tie contract without a second comparator.
+            # position score implements the tie contract without allowing the
+            # ranking-only exact-case bonus to influence position selection.
             if not found or score > best_score:
                 found = True
                 best_score = score
@@ -136,6 +258,13 @@ def _brute_force_match(
 
     if not found:
         return _OracleResult(False, 0, List[Int]())
+    best_score = _closed_form_score(
+        best_positions,
+        bonuses,
+        raw_pattern_scalars,
+        raw_candidate_scalars,
+        folding_active,
+    )
     return _OracleResult(True, best_score, best_positions^)
 
 
@@ -170,18 +299,24 @@ def _next_xorshift64(mut state: UInt64) -> UInt64:
     return state
 
 
-def _random_mixed_case_text(mut state: UInt64, length: Int) -> String:
+def _random_bonus_text(mut state: UInt64, length: Int) -> String:
     var text = String()
     for _ in range(length):
-        var scalar = _next_xorshift64(state) % 4
+        var scalar = _next_xorshift64(state) % 7
         if scalar == 0:
             text += "a"
         elif scalar == 1:
             text += "b"
         elif scalar == 2:
             text += "A"
-        else:
+        elif scalar == 3:
             text += "B"
+        elif scalar == 4:
+            text += "_"
+        elif scalar == 5:
+            text += "/"
+        else:
+            text += " "
     return text^
 
 
@@ -218,11 +353,12 @@ def _assert_three_way_case_mode(
     pattern: StringSlice,
     candidate: StringSlice,
     case_mode: CaseMode,
+    scheme: Scheme = Scheme.DEFAULT,
 ) raises:
     var prepared_pattern = Pattern(pattern, case_mode=case_mode)
-    var actual = Matcher(prepared_pattern).match(candidate)
-    var reference_result = reference_match(prepared_pattern, candidate)
-    var expected = _brute_force_match(pattern, candidate, case_mode)
+    var actual = Matcher(prepared_pattern, scheme=scheme).match(candidate)
+    var reference_result = reference_match(prepared_pattern, candidate, scheme)
+    var expected = _brute_force_match(pattern, candidate, case_mode, scheme)
     _assert_oracle_equal(actual, expected, pattern, candidate)
     _assert_oracle_equal(reference_result, expected, pattern, candidate)
 
@@ -282,14 +418,28 @@ def test_fixed_seed_random_cases_match_both_oracles() raises:
             pattern_length = Int(_next_xorshift64(random_state) % 5)
             candidate_length = Int(_next_xorshift64(random_state) % 10)
 
-        var pattern = _random_mixed_case_text(random_state, pattern_length)
-        var candidate = _random_mixed_case_text(random_state, candidate_length)
+        var pattern = _random_bonus_text(random_state, pattern_length)
+        var candidate = _random_bonus_text(random_state, candidate_length)
         var prepared_pattern = Pattern(pattern)
-        var actual = Matcher(prepared_pattern).match(candidate)
-        var reference_result = reference_match(prepared_pattern, candidate)
-        var expected = _brute_force_match(pattern, candidate)
-        _assert_oracle_equal(actual, expected, pattern, candidate)
-        _assert_oracle_equal(reference_result, expected, pattern, candidate)
+        var default_actual = Matcher(prepared_pattern, scheme=Scheme.DEFAULT).match(
+            candidate
+        )
+        var default_reference = reference_match(
+            prepared_pattern, candidate, Scheme.DEFAULT
+        )
+        var default_expected = _brute_force_match(
+            pattern, candidate, CaseMode.SMART_ASCII, Scheme.DEFAULT
+        )
+        _assert_oracle_equal(default_actual, default_expected, pattern, candidate)
+        _assert_oracle_equal(default_reference, default_expected, pattern, candidate)
+
+        var path_actual = Matcher(prepared_pattern, scheme=Scheme.PATH).match(candidate)
+        var path_reference = reference_match(prepared_pattern, candidate, Scheme.PATH)
+        var path_expected = _brute_force_match(
+            pattern, candidate, CaseMode.SMART_ASCII, Scheme.PATH
+        )
+        _assert_oracle_equal(path_actual, path_expected, pattern, candidate)
+        _assert_oracle_equal(path_reference, path_expected, pattern, candidate)
 
 
 def test_explicit_case_modes_match_both_oracles() raises:
@@ -302,6 +452,12 @@ def test_explicit_case_modes_match_both_oracles() raises:
     _assert_three_way_case_mode("A", "a", CaseMode.IGNORE_ASCII)
     _assert_three_way_case_mode("Ab", "xxaB", CaseMode.IGNORE_ASCII)
     _assert_three_way_case_mode("éA", "Éa", CaseMode.IGNORE_ASCII)
+
+    _assert_three_way_case_mode("ab", "a/b", CaseMode.EXACT, Scheme.DEFAULT)
+    _assert_three_way_case_mode("ab", "a/b", CaseMode.EXACT, Scheme.PATH)
+    _assert_three_way_case_mode(
+        "a", "/Axxxxxxxx a", CaseMode.SMART_ASCII, Scheme.DEFAULT
+    )
 
 
 def main() raises:

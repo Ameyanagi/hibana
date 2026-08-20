@@ -37,12 +37,13 @@ The Mojo import is `hibana`. The eventual Conda distribution is
 The first correctness-first scalar slice is available for development:
 
 ```mojo
-from hibana import CaseMode, Matcher
+from hibana import CaseMode, Matcher, Scheme
 
 
 def main():
     var result = Matcher("kmr").match("kamera")
     var exact_result = Matcher("kmr", case_mode=CaseMode.EXACT).match("kamera")
+    var path_result = Matcher("src", scheme=Scheme.PATH).match("src/hibana")
 ```
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
@@ -55,6 +56,13 @@ ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
 production path uses `O(P*C)` time and memory with no artificial resource
 limits. The bounded exhaustive dynamic program survives only as an internal
 test oracle and is not used by the production path.
+
+`Scheme.DEFAULT` rewards whitespace, common delimiters, word starts,
+camel-case, and number transitions. `Scheme.PATH` treats `/` and `\` as the
+strongest delimiters. Scores retain the 100-point match, 25-point adjacency,
+and one-point gap terms, and add fixed context and exact-case bonuses. See the
+[published scoring table](docs/scoring.md) for every constant, the closed-form
+formula, and the ranking-only exact-case rule.
 
 The exported structs are mutable Mojo value types. Matcher construction
 snapshots its canonical prepared pattern; caller mutation of a returned result
@@ -70,8 +78,9 @@ changes that result value and is not revalidated by Hibana.
 - `conda.recipe/`: local Rattler build recipe
 
 See [the architecture](docs/architecture.md), [design principles](docs/design.md),
-and [v0.1 execution plan](docs/v0.1-plan.md) before proposing a new dependency
-or feature.
+[scoring contract](docs/scoring.md), and
+[v0.1 execution plan](docs/v0.1-plan.md) before proposing a new dependency or
+feature.
 
 ## License
 

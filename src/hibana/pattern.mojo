@@ -55,14 +55,6 @@ def _folds_ascii(case_mode: CaseMode, raw_scalars: List[UInt32]) -> Bool:
     )
 
 
-def _matching_scalar_values(text: StringSlice, fold_ascii: Bool) -> List[UInt32]:
-    var values = _scalar_values(text)
-    if fold_ascii:
-        for index in range(len(values)):
-            values[index] = _fold_ascii_scalar(values[index])
-    return values^
-
-
 struct Pattern(Copyable, Sized):
     """An owned query prepared once for repeated candidate matching.
 

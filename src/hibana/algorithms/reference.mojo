@@ -2,8 +2,16 @@
 
 from std.collections import List
 
-from ..pattern import Pattern, _matching_scalar_values
+from ..pattern import Pattern
 from ..result import MatchResult
+from ..scoring import (
+    Scheme,
+    _BONUS_FIRST_CHAR_MULTIPLIER,
+    _SCORE_ADJACENCY,
+    _SCORE_MATCH,
+    _exact_case_score,
+    _prepare_candidate,
+)
 
 
 comptime _MAX_REFERENCE_CELLS = 1_000_000
@@ -14,10 +22,12 @@ comptime _SCORE_MAGNITUDE_LIMIT = 1_000_000_000
 
 def _checked_reference_cells(pattern_count: Int, candidate_count: Int) raises -> Int:
     """Validate every product used by the bounded reference implementation."""
-    # The score is at most 125 per pattern scalar and its negative magnitude is
-    # bounded by the candidate length. Prove those arithmetic operations remain
-    # inside the deliberately conservative score interval before evaluating one.
-    if pattern_count > _SCORE_MAGNITUDE_LIMIT // 125:
+    # The score is at most 185 per pattern scalar plus 105 for the doubled
+    # first boundary (extra 60) and one-time exact-case bonus (45). Its
+    # negative magnitude is bounded by the candidate length. Prove those
+    # arithmetic operations remain inside the deliberately conservative
+    # interval before evaluating one.
+    if pattern_count > (_SCORE_MAGNITUDE_LIMIT - 105) // 185:
         raise Error("pattern exceeds the scalar reference score limit")
     if candidate_count > _SCORE_MAGNITUDE_LIMIT:
         raise Error("candidate exceeds the scalar reference score limit")
@@ -41,20 +51,27 @@ def _checked_reference_cells(pattern_count: Int, candidate_count: Int) raises ->
     return cells
 
 
-def _score_positions(positions: List[Int]) -> Int:
+def _score_positions(positions: List[Int], bonuses: List[Int]) -> Int:
     """Score a complete subsequence; higher values rank first.
 
-    Each matched scalar contributes 100 points. Adjacent matches receive 25
-    points, while leading and internal gaps cost one point per scalar.
+    Each matched scalar contributes 100 points plus its context bonus. The
+    first position's bonus is doubled. Adjacent matches receive 25 points,
+    while leading and internal gaps cost one point per scalar.
     """
     if len(positions) == 0:
         return 0
 
-    var score = len(positions) * 100 - positions[0]
+    var score = (
+        len(positions) * _SCORE_MATCH
+        + _BONUS_FIRST_CHAR_MULTIPLIER * bonuses[positions[0]]
+        - positions[0]
+    )
+    for index in range(1, len(positions)):
+        score += bonuses[positions[index]]
     for index in range(1, len(positions)):
         var gap = positions[index] - positions[index - 1] - 1
         if gap == 0:
-            score += 25
+            score += _SCORE_ADJACENCY
         else:
             score -= gap
     return score
@@ -90,7 +107,11 @@ def _path_is_earlier(
     return _is_lexicographically_earlier(left, right)
 
 
-def reference_match(pattern: Pattern, candidate: StringSlice) raises -> MatchResult:
+def reference_match(
+    pattern: Pattern,
+    candidate: StringSlice,
+    scheme: Scheme = Scheme.DEFAULT,
+) raises -> MatchResult:
     """Return the bounded exhaustive-DP result for correctness tests.
 
     This raising implementation is a deliberately resource-limited test oracle,
@@ -101,11 +122,11 @@ def reference_match(pattern: Pattern, candidate: StringSlice) raises -> MatchRes
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
-    var candidate_scalars = _matching_scalar_values(candidate, pattern._fold_ascii)
-    if len(candidate_scalars) < len(pattern):
+    var candidate_data = _prepare_candidate(candidate, pattern._fold_ascii, scheme)
+    if len(candidate_data.match_scalars) < len(pattern):
         return MatchResult.no_match()
 
-    var candidate_count = len(candidate_scalars)
+    var candidate_count = len(candidate_data.match_scalars)
     var pattern_count = len(pattern)
     var cell_count = _checked_reference_cells(pattern_count, candidate_count)
     var unreachable = -_SCORE_MAGNITUDE_LIMIT - 1
@@ -113,13 +134,20 @@ def reference_match(pattern: Pattern, candidate: StringSlice) raises -> MatchRes
     var previous = List[Int](length=candidate_count, fill=unreachable)
 
     for candidate_index in range(candidate_count):
-        if candidate_scalars[candidate_index] == pattern._scalars[0]:
-            previous[candidate_index] = 100 - candidate_index
+        if candidate_data.match_scalars[candidate_index] == pattern._scalars[0]:
+            previous[candidate_index] = (
+                _SCORE_MATCH
+                + _BONUS_FIRST_CHAR_MULTIPLIER * candidate_data.bonuses[candidate_index]
+                - candidate_index
+            )
 
     for pattern_index in range(1, pattern_count):
         var current = List[Int](length=candidate_count, fill=unreachable)
         for candidate_index in range(candidate_count):
-            if candidate_scalars[candidate_index] != pattern._scalars[pattern_index]:
+            if (
+                candidate_data.match_scalars[candidate_index]
+                != pattern._scalars[pattern_index]
+            ):
                 continue
 
             var best_predecessor = -1
@@ -128,9 +156,11 @@ def reference_match(pattern: Pattern, candidate: StringSlice) raises -> MatchRes
                 if previous[predecessor] == unreachable:
                     continue
                 var gap = candidate_index - predecessor - 1
-                var transition = 100 - gap
+                var transition = (
+                    _SCORE_MATCH + candidate_data.bonuses[candidate_index] - gap
+                )
                 if gap == 0:
-                    transition = 125
+                    transition += _SCORE_ADJACENCY
                 var score = previous[predecessor] + transition
                 if (
                     best_predecessor < 0
@@ -187,5 +217,6 @@ def reference_match(pattern: Pattern, candidate: StringSlice) raises -> MatchRes
         positions[pattern_index] = best_end
         if pattern_index > 0:
             best_end = backpointers[pattern_index * candidate_count + best_end]
-    var score = _score_positions(positions)
+    var score = _score_positions(positions, candidate_data.bonuses)
+    score += _exact_case_score(pattern, candidate_data, positions)
     return MatchResult(True, score, positions^)

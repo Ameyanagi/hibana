@@ -2,21 +2,33 @@
 
 from std.collections import List
 
-from ..pattern import Pattern, _matching_scalar_values
+from ..pattern import Pattern
 from ..result import MatchResult
+from ..scoring import (
+    Scheme,
+    _BONUS_FIRST_CHAR_MULTIPLIER,
+    _SCORE_ADJACENCY,
+    _SCORE_MATCH,
+    _exact_case_score,
+    _prepare_candidate,
+)
 
 
 comptime _UNREACHABLE = Int.MIN // 4
 
 
-def _transition(previous: Int, current: Int) -> Int:
+def _transition(previous: Int, current: Int, bonus: Int) -> Int:
     var gap = current - previous - 1
     if gap == 0:
-        return 125
-    return 100 - gap
+        return _SCORE_MATCH + bonus + _SCORE_ADJACENCY
+    return _SCORE_MATCH + bonus - gap
 
 
-def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
+def scalar_match(
+    pattern: Pattern,
+    candidate: StringSlice,
+    scheme: Scheme = Scheme.DEFAULT,
+) -> MatchResult:
     """Return the best prepared-scalar subsequence match in ``O(P*C)`` time.
 
     Backward dynamic-programming rows retain each optimal suffix score. A
@@ -27,9 +39,9 @@ def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
-    var candidate_scalars = _matching_scalar_values(candidate, pattern._fold_ascii)
+    var candidate_data = _prepare_candidate(candidate, pattern._fold_ascii, scheme)
     var pattern_count = len(pattern)
-    var candidate_count = len(candidate_scalars)
+    var candidate_count = len(candidate_data.match_scalars)
     if pattern_count > candidate_count:
         return MatchResult.no_match()
 
@@ -38,7 +50,10 @@ def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
     )
     var last_row_offset = (pattern_count - 1) * candidate_count
     for candidate_index in range(candidate_count):
-        if candidate_scalars[candidate_index] == pattern._scalars[pattern_count - 1]:
+        if (
+            candidate_data.match_scalars[candidate_index]
+            == pattern._scalars[pattern_count - 1]
+        ):
             suffix_scores[last_row_offset + candidate_index] = 0
 
     for reverse_row in range(1, pattern_count):
@@ -52,14 +67,21 @@ def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
             if new_gapped_index < candidate_count:
                 var suffix = suffix_scores[next_row_offset + new_gapped_index]
                 if suffix != _UNREACHABLE:
-                    var adjusted_suffix = suffix - new_gapped_index
+                    var adjusted_suffix = (
+                        suffix
+                        + candidate_data.bonuses[new_gapped_index]
+                        - new_gapped_index
+                    )
                     if (
                         running_gapped_max == _UNREACHABLE
                         or adjusted_suffix > running_gapped_max
                     ):
                         running_gapped_max = adjusted_suffix
 
-            if candidate_scalars[candidate_index] != pattern._scalars[pattern_index]:
+            if (
+                candidate_data.match_scalars[candidate_index]
+                != pattern._scalars[pattern_index]
+            ):
                 continue
 
             var best_suffix = _UNREACHABLE
@@ -67,10 +89,17 @@ def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
             if adjacent_index < candidate_count:
                 var adjacent_suffix = suffix_scores[next_row_offset + adjacent_index]
                 if adjacent_suffix != _UNREACHABLE:
-                    best_suffix = 125 + adjacent_suffix
+                    best_suffix = (
+                        _SCORE_MATCH
+                        + candidate_data.bonuses[adjacent_index]
+                        + _SCORE_ADJACENCY
+                        + adjacent_suffix
+                    )
 
             if running_gapped_max != _UNREACHABLE:
-                var gapped_suffix = running_gapped_max + 101 + candidate_index
+                var gapped_suffix = (
+                    running_gapped_max + _SCORE_MATCH + 1 + candidate_index
+                )
                 if best_suffix == _UNREACHABLE or gapped_suffix > best_suffix:
                     best_suffix = gapped_suffix
             suffix_scores[current_row_offset + candidate_index] = best_suffix
@@ -81,7 +110,13 @@ def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
         var suffix = suffix_scores[candidate_index]
         if suffix == _UNREACHABLE:
             continue
-        var total = 100 - candidate_index + suffix
+        var first_bonus = candidate_data.bonuses[candidate_index]
+        var total = (
+            _SCORE_MATCH
+            + _BONUS_FIRST_CHAR_MULTIPLIER * first_bonus
+            - candidate_index
+            + suffix
+        )
         if best_start < 0 or total > best_total:
             best_start = candidate_index
             best_total = total
@@ -102,13 +137,23 @@ def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
             var suffix = suffix_scores[row_offset + candidate_index]
             if (
                 suffix == _UNREACHABLE
-                or candidate_scalars[candidate_index] != pattern._scalars[pattern_index]
+                or candidate_data.match_scalars[candidate_index]
+                != pattern._scalars[pattern_index]
             ):
                 continue
-            if _transition(previous, candidate_index) + suffix == required_suffix:
+            if (
+                _transition(
+                    previous,
+                    candidate_index,
+                    candidate_data.bonuses[candidate_index],
+                )
+                + suffix
+                == required_suffix
+            ):
                 positions[pattern_index] = candidate_index
                 found = True
                 break
         debug_assert(found, "suffix DP must admit a reconstruction step")
 
+    best_total += _exact_case_score(pattern, candidate_data, positions)
     return MatchResult(True, best_total, positions^)

@@ -3,6 +3,7 @@
 from .algorithms.scalar import scalar_match
 from .pattern import CaseMode, Pattern
 from .result import MatchResult
+from .scoring import Scheme
 
 
 struct Matcher(Copyable):
@@ -11,22 +12,35 @@ struct Matcher(Copyable):
     Construction copies the pattern, so later mutation of the source ``Pattern``
     does not affect this matcher. Direct mutation of underscore-prefixed matcher
     storage changes later matches and is outside the stable public API.
+
+    Scores follow the fixed table in ``docs/scoring.md``. A non-match and an
+    empty-pattern match both score zero; inspect ``matched`` to distinguish
+    them. Returned positions are Unicode scalar indices, not UTF-8 byte
+    offsets.
     """
 
     var _pattern: Pattern
+    var _scheme: Scheme
 
     def __init__(
         out self,
         query: StringSlice,
         case_mode: CaseMode = CaseMode.SMART_ASCII,
+        scheme: Scheme = Scheme.DEFAULT,
     ):
-        """Prepare ``query`` for repeated candidate matching."""
+        """Prepare ``query`` and its scoring scheme for repeated matching."""
         self._pattern = Pattern(query, case_mode=case_mode)
+        self._scheme = scheme
 
-    def __init__(out self, pattern: Pattern):
+    def __init__(
+        out self,
+        pattern: Pattern,
+        scheme: Scheme = Scheme.DEFAULT,
+    ):
         """Build a matcher from an already prepared pattern."""
         self._pattern = pattern.copy()
+        self._scheme = scheme
 
     def match(self, candidate: StringSlice) -> MatchResult:
         """Return the best match, or the canonical non-match result."""
-        return scalar_match(self._pattern, candidate)
+        return scalar_match(self._pattern, candidate, self._scheme)

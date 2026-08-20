@@ -3,3 +3,4 @@
 from .matcher import Matcher
 from .pattern import CaseMode, Pattern
 from .result import MatchResult
+from .scoring import Scheme

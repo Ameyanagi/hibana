@@ -1,4 +1,4 @@
-from hibana import CaseMode, Matcher, MatchResult, Pattern
+from hibana import CaseMode, Matcher, MatchResult, Pattern, Scheme
 from hibana.algorithms.reference import reference_match
 from std.collections import List
 from std.testing import (
@@ -17,23 +17,11 @@ def _scalar_values(text: StringSlice) -> List[UInt32]:
     return values^
 
 
-def _recompute_score(positions: List[Int]) -> Int:
-    if len(positions) == 0:
-        return 0
-    var score = len(positions) * 100 - positions[0]
-    for index in range(1, len(positions)):
-        var gap = positions[index] - positions[index - 1] - 1
-        if gap == 0:
-            score += 25
-        else:
-            score -= gap
-    return score
-
-
 def _assert_match_invariants(
     pattern: StringSlice,
     candidate: StringSlice,
     result: MatchResult,
+    expected_score: Int,
 ) raises:
     var pattern_scalars = _scalar_values(pattern)
     var candidate_scalars = _scalar_values(candidate)
@@ -45,7 +33,7 @@ def _assert_match_invariants(
         assert_equal(candidate_scalars[position], pattern_scalars[index])
         if index > 0:
             assert_true(result.positions[index - 1] < position)
-    assert_equal(result.score, _recompute_score(result.positions))
+    assert_equal(result.score, expected_score)
 
 
 def _assert_same_result(left: MatchResult, right: MatchResult) raises:
@@ -65,14 +53,14 @@ def test_pattern_is_prepared_by_unicode_scalar() raises:
 def test_empty_pattern_matches_every_candidate() raises:
     var result = Matcher("").match("anything")
     assert_true(result.matched)
-    assert_equal(result.score, 0)
+    assert_equal(result.score, 0)  # Empty patterns receive no score components.
     assert_equal(len(result.positions), 0)
 
 
 def test_scalar_subsequence_reports_score_and_positions() raises:
     var result = Matcher("kmr").match("kamera")
     assert_true(result.matched)
-    assert_equal(result.score, 298)
+    assert_equal(result.score, 463)  # 300 + 60 + 60 - 2 + 45
     assert_equal(len(result.positions), 3)
     assert_equal(result.positions[0], 0)
     assert_equal(result.positions[1], 2)
@@ -84,15 +72,15 @@ def test_contiguous_match_scores_higher_than_gapped_match() raises:
     var contiguous = matcher.match("kmr")
     var gapped = matcher.match("kamera")
     assert_true(contiguous.score > gapped.score)
-    assert_equal(contiguous.score, 350)
+    assert_equal(contiguous.score, 515)  # 300 + 60 + 60 + 50 + 45
 
 
 def test_best_scoring_subsequence_is_selected() raises:
     var result = Matcher("ab").match("aab")
     assert_true(result.matched)
-    assert_equal(result.positions[0], 1)
+    assert_equal(result.positions[0], 0)
     assert_equal(result.positions[1], 2)
-    assert_equal(result.score, 224)
+    assert_equal(result.score, 364)  # 200 + 60 + 60 - 1 + 45
 
 
 def test_equal_scores_choose_lexicographically_earlier_positions() raises:
@@ -106,7 +94,7 @@ def test_equal_scores_choose_lexicographically_earlier_positions() raises:
 def test_non_match_is_canonical() raises:
     var result = Matcher("xyz").match("xylophone")
     assert_false(result.matched)
-    assert_equal(result.score, 0)
+    assert_equal(result.score, 0)  # Canonical non-matches have no score.
     assert_equal(len(result.positions), 0)
 
 
@@ -119,7 +107,7 @@ def test_smart_case_lowercase_query_matches_mixed_case_candidate() raises:
     assert_true(result.matched)
     assert_equal(result.positions[0], 0)
     assert_equal(result.positions[1], 2)
-    assert_equal(result.score, 199)
+    assert_equal(result.score, 359)  # (100 + 60) + (100 + 40) + 60 - 1
 
 
 def test_exact_case_mode_rejects_smart_case_match() raises:
@@ -151,7 +139,7 @@ def test_positions_are_unicode_scalar_indices() raises:
     assert_true(result.matched)
     assert_equal(result.positions[0], 1)
     assert_equal(result.positions[1], 2)
-    assert_equal(result.score, 224)
+    assert_equal(result.score, 269)  # 200 + 25 - 1 + 45
 
 
 def test_combining_scalar_positions_do_not_split_utf8_bytes() raises:
@@ -173,7 +161,7 @@ def test_nonempty_pattern_does_not_match_empty_candidate() raises:
 
 
 def test_a_match_may_have_a_negative_score() raises:
-    var result = Matcher("z").match(
+    var result = Matcher("z", case_mode=CaseMode.EXACT).match(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaz"
     )
@@ -188,11 +176,20 @@ def test_prepared_pattern_can_be_reused() raises:
     assert_true(matcher.match("feedback").matched)
 
 
+def test_prepared_pattern_matcher_accepts_scheme() raises:
+    var pattern = Pattern("ab", case_mode=CaseMode.EXACT)
+    var default_result = Matcher(pattern).match("a/b")
+    var path_result = Matcher(pattern, scheme=Scheme.PATH).match("a/b")
+    assert_equal(default_result.score, 374)  # 200 + 60 + 55 + 60 - 1
+    assert_equal(path_result.score, 379)  # 200 + 60 + 60 + 60 - 1
+
+
 def test_matcher_outputs_satisfy_membership_order_and_score_invariants() raises:
     var pattern = "a🔥京"
     var candidate = "xxa--🔥z京-end"
     var result = Matcher(pattern).match(candidate)
-    _assert_match_invariants(pattern, candidate, result)
+    # 300 + 50 boundary + 0 first-extra - 2 leading - 3 internal + 45.
+    _assert_match_invariants(pattern, candidate, result, 390)
 
 
 def test_matching_is_deterministic_across_repeated_calls() raises:
@@ -236,7 +233,7 @@ def test_production_match_has_no_reference_transition_limit() raises:
         candidate += "a"
     var result = Matcher("aa").match(candidate)
     assert_true(result.matched)
-    assert_equal(result.score, 225)
+    assert_equal(result.score, 390)  # 200 + 60 + 60 + 25 + 45
     assert_equal(len(result.positions), 2)
     assert_equal(result.positions[0], 0)
     assert_equal(result.positions[1], 1)
@@ -251,7 +248,7 @@ def test_production_match_has_no_reference_tie_break_limit() raises:
         candidate += "a"
     var result = Matcher(pattern).match(candidate)
     assert_true(result.matched)
-    assert_equal(result.score, 1_225)
+    assert_equal(result.score, 1_390)  # 1_000 + 60 + 60 + 225 + 45
     assert_equal(len(result.positions), 10)
     assert_equal(result.positions[0], 0)
     assert_equal(result.positions[9], 9)
@@ -268,7 +265,7 @@ def test_production_match_has_no_reference_state_table_limit() raises:
         candidate += "a"
     var result = Matcher(pattern).match(candidate)
     assert_true(result.matched)
-    assert_equal(result.score, 124_975)
+    assert_equal(result.score, 125_140)  # 100_000 + 60 + 60 + 24_975 + 45
     assert_equal(len(result.positions), 1_000)
     assert_equal(result.positions[0], 0)
     assert_equal(result.positions[999], 999)
