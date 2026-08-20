@@ -31,7 +31,7 @@ architecture and algorithmic ideas.
 | Matcher lifetime | `Matcher` owns configuration and roughly 135 KiB of reusable scratch, so callers are told to reuse it. | Each low-level call accepts an optional reusable `Slab`; the application matcher owns one slab per worker. | No reusable matcher object; score-only uses stack arrays and positions allocate matrices per call. | A pattern-bound `Matcher` remains the ergonomic façade and owns private reusable workspace when production code needs it. One matcher is used by one task at a time. |
 | Score and positions | Separate `fuzzy_match` and `fuzzy_indices`; indices are normally computed only for rendered finalists. | `withPos` controls optional backtracking; `Result` always contains range and score. | Separate `match` and `match_positions`. | Keep public `match` correct and simple. Add an internal score-only lane before top-K; expose it only if downstream use proves value. |
 | Result meaning | `Option<u16>`/`Option<u32>` distinguishes no match; index vectors are caller-owned and not cleared. | Negative start/end denotes no match; positions are optional and returned in a separate pointer. | `-INFINITY` represents no score and also oversized input; exact match is `INFINITY`. | Keep explicit `matched`, checked integer score, and owned scalar positions. Resource rejection raises and is never a non-match. |
-| Text unit | ASCII bytes or a UTF-32-like grapheme representation. | ASCII bytes or Unicode code points/runes. | Bytes with C-library case conversion. | Unicode scalar values in v0.1. Grapheme or transformed-source mapping belongs in Moji, not the scoring kernel. |
+| Text unit | ASCII bytes or a UTF-32-like grapheme representation. | ASCII bytes or Unicode code points/runes. | Bytes with C-library case conversion. | Unicode scalar values in v0.1. Positions are relative to exactly the candidate view supplied to Hibana; coordinate conversion and source projection remain downstream. |
 
 Primary evidence:
 
@@ -126,27 +126,33 @@ Nucleo's low-level `match_list` also collects and sorts all matches in
 Its high-level worker also retains and sorts the full match vector; none of the
 reviewed libraries provides Hibana's required bounded top-K operation.
 
-Hibana's v0.1 top-K is deliberately different:
+Hibana's v0.1 top-K is deliberately different. Candidate identity is only the
+zero-based ordinal in the supplied collection:
 
-1. Stream candidates in caller input order and compute score without positions.
+1. Visit candidates in ascending ordinal order and compute score without
+   positions.
 2. Keep at most `K` records in a worst-first heap. Lower score is worse; for an
-   equal score, the later input identity is worse.
-3. Recompute full positions only for the retained identities.
+   equal score, the larger ordinal is worse.
+3. Recompute full positions only for the retained ordinals.
 4. Return retained results ordered by score descending, then input order
    ascending.
 
 This uses `O(K)` ranking state rather than collecting every match. The v0.1 API
-accepts an indexable in-memory candidate collection so position recomputation
-does not require Hibana to copy an unbounded stream. A future streaming API may
-retain at most K candidate values, but only after a downstream ownership study.
+borrows an immutable indexable in-memory candidate collection for the duration
+of the call. Each ordinal must yield the same scalar sequence in the scoring and
+position passes; Hibana invokes no caller callback between them. Results own
+their ordinal, score, and positions, so no candidate borrow escapes. A future
+streaming API may retain at most K candidate values, and a future application
+adapter may carry an opaque caller ID separately from the ordinal, but neither
+changes the ordinal tie rule. Both require a downstream ownership study.
 
 ## Adopted and rejected ideas
 
 | Idea | Decision | Reason |
 | --- | --- | --- |
-| Prepare a query once and reuse matcher workspace | Adopt | All strong references avoid repeating at least some query or allocation work. It fits the current `Pattern`/`Matcher` API. |
+| Prepare a query once and reuse matcher workspace | Adopt | Nucleo owns prepared needles and reusable matcher scratch; fzf prepares/caches patterns and accepts a reusable slab. Fzy is the useful counterexample that prepares per call. Hibana's match-many API benefits from the nucleo/fzf split. |
 | Separate broad score calculation from finalist positions | Adopt internally | nucleo, fzf, and fzy all make positions optional or separate. This is essential for bounded top-K. |
-| Cheap ordered-subsequence prefilter and narrowed DP range | Adopt | Most candidates are non-matches. The prefilter remains scalar reference-tested and preserves scalar indices. |
+| Cheap ordered-subsequence prefilter and narrowed DP range | Adopt after baseline | The pass can reject a non-match without DP and can find a safe smaller interval for a match. It remains scalar reference-tested and preserves scalar indices; HIB-016 measures rejection and narrowing yield before default dispatch changes. |
 | Rolling rows for score-only DP and compact traceback decisions | Adopt | It bounds score-only memory and keeps position cost explicit. Every size calculation remains checked. |
 | ASCII short-pattern fast paths | Adopt after baselines | fzf's one/two-character paths demonstrate the opportunity, but conformance and measurement come first. |
 | SIMD-assisted dual-byte search | Investigate late | fzf limits SIMD to a narrow prefilter primitive with scalar fallback and exhaustive/fuzz equivalence tests; that is the acceptable boundary. |
@@ -198,9 +204,32 @@ Dependency direction is downward only:
   they do not define their own policies.
 - SIMD may accelerate prefilter/equality/classification primitives, but the
   scalar implementation remains available on every target.
-- `Pattern` may depend on Moji later for transformed-to-source mappings.
-  Hibana never depends on Yomi, Yuragi, a terminal, or filesystem traversal.
+- Hibana owns no transformed-to-source mapping. A later Moji dependency may
+  supply only a generic scalar text view after HIB-013 evidence. Hibana never
+  depends on Yomi, Yuragi, a terminal, or filesystem traversal.
 - benchmark and oracle helpers remain outside the package root.
+
+### Downstream coordinate gate
+
+Hibana's coordinate boundary ends at zero-based Unicode-scalar positions in
+exactly the candidate view it matched. Hibana does not return byte offsets,
+display columns, grapheme indices, or transformed-to-source mappings.
+
+Before HIB-020 can claim Yuragi integration, the packaged ecosystem must prove
+this pipeline without a Yuragi-specific scoring adapter:
+
+1. Yuragi supplies direct or Yomi-produced search text as a StringSlice or an
+   approved Moji scalar view.
+2. Hibana returns scalar positions relative to that exact view.
+3. Moji converts each scalar position to its non-empty half-open UTF-8 byte
+   range in the same view. Separate positions remain separate ranges.
+4. For phonetic text, Yomi batch-projects those output-byte ranges to ordered
+   exact original-source ranges without bridging a gap.
+5. Yuragi merges direct and phonetic ranked results and owns highlight policy.
+
+The gate requires ASCII, multibyte pass-through, expansion, contraction, and
+discontiguous-highlight fixtures. It does not permit Hibana to import Yomi or
+to understand a language.
 
 A likely source layout is:
 
@@ -230,8 +259,9 @@ File names are targets, not permission to expose internal modules from
 `Pattern` remains an owned mutable Mojo value whose single canonical state is
 the prepared scalar sequence and explicit preparation policy. Exact mode stores
 the input scalar unchanged. ASCII-insensitive mode maps only `A` through `Z`
-and preserves a one-to-one scalar index relation. Full Unicode folding or
-normalization is excluded until a source-mapping design exists.
+and preserves a one-to-one scalar index relation. Full Unicode folding and
+normalization are excluded from Hibana. A downstream layer may supply an
+already transformed scalar view while retaining its mapping outside Hibana.
 
 Do not add both a source string and prepared scalars to `Pattern`: reachable
 Mojo fields could diverge. An ASCII acceleration must either be derivable from
@@ -244,6 +274,16 @@ prefilter buffers, and traceback storage. Workspace grows only after checked
 limits and may retain a documented high-water capacity. A matcher is not
 implicitly synchronized; callers use one matcher per concurrent task. Hibana
 does not spawn workers.
+
+The current workspace-free experimental `Matcher` is `Copyable`; that is not
+the production lifetime contract. Before reusable workspace lands, `Matcher`
+becomes a move-only mutable owner. Moving transfers its pattern, policy, and
+workspace; copying or aliasing scratch is unsupported. Constructing another
+matcher from the same copyable `Pattern` creates fresh empty workspace. Matching
+methods may mutate private workspace without changing semantic configuration,
+and destruction releases the retained high-water allocation. A future named
+clone operation would also start with empty workspace and requires measured user
+need; ordinary copy syntax must not duplicate a warmed matcher.
 
 Candidate preparation stays measurement-gated. Repeatedly converting a large
 candidate corpus may justify a `PreparedCandidate` or Moji text view, as nucleo
@@ -271,16 +311,19 @@ var matcher = Matcher(pattern, ScoringScheme.default())
 # Public correctness path: always returns owned positions on a match.
 var result = matcher.match("Kamera")
 
-# Bounded collection path: identities are caller input indices.
+# Bounded collection path: identity is the zero-based candidate ordinal.
 var ranked = matcher.top_k(candidates, limit=50)
 ```
 
 `top_k`'s exact collection signature waits for a compiled Mojo ownership
-prototype. It must use Mojo-native collections/views, return caller integer
-identities, reject a non-positive or unrepresentable bound, and never introduce
-a universal Hibana candidate container. A private score-only operation feeds
-top-K; making it public requires an independent user need and an explicit
-no-position result type rather than weakening `MatchResult` invariants.
+prototype. Its semantics do not: it borrows an immutable indexed Mojo-native
+collection/view and returns owned `RankedMatch` values containing
+`candidate_index`, `score`, and positions. `candidate_index` is the collection
+ordinal, not an opaque caller ID. The operation rejects a non-positive or
+unrepresentable bound and never introduces a universal Hibana candidate
+container. A private score-only operation feeds top-K; making it public requires
+an independent user need and an explicit no-position result type rather than
+weakening `MatchResult` invariants.
 
 ## Resource and error contract
 
@@ -302,9 +345,17 @@ The production lane must follow these rules:
    and must publish its separate bound.
 5. A subsequence prefilter targets `O(C)` no-match time and returns scalar
    bounds without changing positions.
-6. Top-K retains `O(K)` ranked records plus documented reusable matcher
-   workspace. Final output owns positions for at most K matches.
-7. Allocation failure from the runtime may still raise, but sizes must not wrap
+6. Top-K is all-or-error. A scoring or finalist-reconstruction resource failure
+   discards local ranking/output state and raises; it never returns a partial
+   list. Each reconstruction size is checked before allocating, and both passes
+   observe the same immutable candidate data.
+7. Excluding the caller-owned collection and returned value, top-K peak and
+   retained auxiliary space is `O(C_scan + P*C_final + K)` for the initial
+   production design: `C_scan` is the longest candidate scored during the
+   matcher's lifetime and `C_final` is the longest finalist reconstructed.
+   These terms are checked matcher high-water buffers plus the `O(K)` heap.
+   Returned owned position lists occupy at most `O(K*P)` additional space.
+8. Allocation failure from the runtime may still raise, but sizes must not wrap
    or trigger a knowingly unbounded request first.
 
 ## Scalar and SIMD separation
@@ -384,17 +435,18 @@ semantic work to optimization:
    path objects, filesystem calls, or platform lookup.
 4. **HIB-010 — conformance corpus.** Freeze score, position, case, boundary,
    repeated-scalar, and tie tables before another matcher is introduced.
-5. **HIB-011/HIB-012 — ranked identity and bounded top-K.** Define score
-   descending/input order ascending, implement a worst-first K heap, and
-   reconstruct positions only for finalists.
+5. **HIB-011/HIB-012 — ranked ordinal and bounded top-K.** Compile the immutable
+   indexed-collection ownership prototype, define score descending/ordinal
+   ascending, implement a worst-first K heap, and prove stable two-pass data,
+   owned results, all-or-error reconstruction, and its separate space bound.
 6. **HIB-014 — benchmark harness.** It is already dependency-ready, but land it
    after the policy surface is fixed so the matrix does not immediately churn.
 7. **HIB-015 — generated datasets.** Add deterministic 100/10,000/1,000,000
    corpora and checksums; keep large generation optional if repository size
    requires it.
 8. **HIB-016 — baseline.** Measure preparation, reuse, score-only prototype,
-   positions, top-K, selectivity, and allocation high water before production
-   optimization.
+   positions, top-K, selectivity, prefilter rejection/narrowing yield, and
+   allocation high water before production optimization.
 9. **HIB-017a — prefilter and bounds.** Add an independently tested scalar
    subsequence prefilter returning the smallest safe DP interval.
 10. **HIB-017b — production score lane.** Implement checked `O(P*C)` score-only
@@ -408,10 +460,12 @@ semantic work to optimization:
     scalar fallback, architecture matrix, and raw measurements. It may be
     deferred from v0.1.
 14. **HIB-013 — candidate preparation decision.** Run only after HIB-016 and a
-    Yuragi ownership study; accept an explicit no-change decision.
+    Yuragi ownership study. Consider only preparation or a generic Moji scalar
+    view, never source mapping; accept an explicit no-change decision.
 15. **HIB-019 through HIB-022 — release gates.** Document both score-only and
-    positions complexity, prove packaged downstream use, validate artifacts,
-    then perform the release audit.
+    positions complexity, prove the packaged Moji scalar-to-byte/Yomi
+    projection/Yuragi orchestration pipeline, validate artifacts, then perform
+    the release audit.
 
 `HIB-017a/b/c` and `HIB-018a/b` are review-sized subdivisions of the existing
 plan items, not new public milestones. No production path is default until the
@@ -424,7 +478,8 @@ oracle equivalence, resource, benchmark, package, and downstream gates pass.
   clocks, network access, or internal worker pools.
 - Fzf-compatible query syntax or exact ranking compatibility with any reviewed
   project.
-- Unicode normalization/full case folding without a source mapping.
+- Unicode normalization, full case folding, or ownership of source mappings;
+  callers may supply an externally mapped scalar view.
 - A universal candidate/array/executor type, persistent index, or database.
 - Silent approximate matching, mandatory SIMD, GPU matching, assembly, or FFI
   in v0.1.

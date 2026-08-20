@@ -4,7 +4,8 @@ Hibana owns Fuzzy pattern preparation, scoring, match positions, ranking schemes
 
 ## Dependency boundary
 
-Allowed ecosystem dependencies: Moji for shared text views and mappings once required; no CJK-specific dependency.
+Allowed ecosystem dependencies: Moji only for a generic scalar text view after
+measurement proves the need; no source-mapping or CJK-specific dependency.
 Expected downstream consumers: Yuragi and other search, command-palette, launcher, and filtering applications.
 
 Dependencies point from applications and higher-level packages toward smaller
