@@ -40,3 +40,6 @@ It checks state-table, transition, tie-break, flattened-index, and score bounds
 before allocating or evaluating. A future production scalar implementation must
 preserve its match, score, and tie semantics without inheriting its polynomial
 complexity.
+
+The primary-source comparison and production target are documented in
+[Reference architecture](reference-architecture.md).
