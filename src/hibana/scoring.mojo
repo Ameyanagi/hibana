@@ -50,24 +50,6 @@ comptime _DIGIT = 5
 comptime _WORD_OTHER = 6
 
 
-struct _PreparedCandidate(Copyable):
-    """Raw, comparison, and score data decoded in one scalar pass."""
-
-    var raw_scalars: List[UInt32]
-    var match_scalars: List[UInt32]
-    var bonuses: List[Int]
-
-    def __init__(
-        out self,
-        var raw_scalars: List[UInt32],
-        var match_scalars: List[UInt32],
-        var bonuses: List[Int],
-    ):
-        self.raw_scalars = raw_scalars^
-        self.match_scalars = match_scalars^
-        self.bonuses = bonuses^
-
-
 def _char_class(scalar: UInt32) -> Int:
     """Classify one scalar under the default ASCII delimiter policy."""
     if (
@@ -131,38 +113,31 @@ def _bonus(prev_class: Int, cls: Int, scheme: Scheme) -> Int:
     return 0
 
 
-def _prepare_candidate(
-    text: StringSlice, fold_ascii: Bool, scheme: Scheme
-) -> _PreparedCandidate:
-    """Decode, fold, classify, and score candidate scalars in one pass."""
-    var raw_scalars = List[UInt32]()
-    var match_scalars = List[UInt32]()
-    var bonuses = List[Int]()
+def _candidate_bonuses(scalars: Span[UInt32, _], scheme: Scheme) -> List[Int]:
+    """Classify borrowed candidate scalars without copying the caller's span."""
+    var bonuses = List[Int](capacity=len(scalars))
     var prev_class = _WHITESPACE
-    for scalar in text.codepoints():
-        var raw_scalar = scalar.to_u32()
-        var cls = _scheme_char_class(raw_scalar, scheme)
-        raw_scalars.append(raw_scalar)
-        match_scalars.append(
-            _fold_ascii_scalar(raw_scalar) if fold_ascii else raw_scalar
-        )
+    for index in range(len(scalars)):
+        var cls = _scheme_char_class(scalars[index], scheme)
         bonuses.append(_bonus(prev_class, cls, scheme))
         prev_class = cls
-    return _PreparedCandidate(raw_scalars^, match_scalars^, bonuses^)
+    return bonuses^
+
+
+def _candidate_match_scalar(scalar: UInt32, fold_ascii: Bool) -> UInt32:
+    """Apply the prepared pattern's candidate-side ASCII case policy."""
+    return _fold_ascii_scalar(scalar) if fold_ascii else scalar
 
 
 def _exact_case_score(
     pattern: Pattern,
-    candidate: _PreparedCandidate,
+    candidate: Span[UInt32, _],
     positions: List[Int],
 ) -> Int:
     """Return the ranking-only exact-case bonus after position selection."""
     if not pattern._fold_ascii:
         return 0
     for pattern_index in range(len(positions)):
-        if (
-            pattern._raw_scalars[pattern_index]
-            != candidate.raw_scalars[positions[pattern_index]]
-        ):
+        if pattern._raw_scalars[pattern_index] != candidate[positions[pattern_index]]:
             return 0
     return _BONUS_EXACT_CASE

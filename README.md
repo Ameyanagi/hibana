@@ -20,6 +20,7 @@ Install [Pixi](https://pixi.sh/), then run:
 pixi install --locked
 pixi run check
 pixi run example
+pixi run example-rank
 ```
 
 The exact stable Mojo compiler and all development dependencies are captured in
@@ -34,16 +35,23 @@ The Mojo import is `hibana`. The eventual Conda distribution is
 `mojo-hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 
-The first correctness-first scalar slice is available for development:
+The public API ranks caller-owned candidates without buffering every match:
 
 ```mojo
 from hibana import CaseMode, Matcher, Scheme
+from std.collections import List
 
 
-def main():
-    var result = Matcher("kmr").match("kamera")
-    var exact_result = Matcher("kmr", case_mode=CaseMode.EXACT).match("kamera")
-    var path_result = Matcher("src", scheme=Scheme.PATH).match("src/hibana")
+def main() raises:
+    var paths: List[String] = [
+        "src/hibana/matcher.mojo", "src/hibana/scoring.mojo",
+        "tests/test_basic.mojo", "README.md",
+    ]
+    var matcher = Matcher("hm", scheme=Scheme.PATH)  # Smart case is the default.
+    var ranked = matcher.rank(paths, k=5)
+    for match in ranked:
+        print(match.score, match.positions, paths[match.index])
+    _ = Matcher("HM", case_mode=CaseMode.EXACT, scheme=Scheme.PATH)  # Escape hatch.
 ```
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
@@ -56,6 +64,12 @@ ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
 production path uses `O(P*C)` time and memory with no artificial resource
 limits. The bounded exhaustive dynamic program survives only as an internal
 test oracle and is not used by the production path.
+
+`Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
+positions into that span without copying it. `Matcher.rank` uses bounded
+`O(K)` storage and returns matches by score descending, then input index
+ascending. `TopK` exposes the same streaming policy when candidates do not
+already live in a single span.
 
 `Scheme.DEFAULT` rewards whitespace, common delimiters, word starts,
 camel-case, and number transitions. `Scheme.PATH` treats `/` and `\` as the

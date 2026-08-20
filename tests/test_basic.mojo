@@ -126,6 +126,32 @@ def test_non_ascii_scalars_never_fold() raises:
     assert_true(Matcher("京").match("京").matched)
 
 
+def test_match_scalars_matches_string_path_for_mixed_case_and_unicode() raises:
+    var patterns: List[String] = ["", "km", "KM", "京a", "🔥b", "é"]
+    var candidates: List[String] = [
+        "KaMera",
+        "kamera",
+        "北京A大学",
+        "a🔥B",
+        "café",
+        "CAFÉ",
+        "",
+    ]
+    var case_modes: List[CaseMode] = [
+        CaseMode.SMART_ASCII,
+        CaseMode.EXACT,
+        CaseMode.IGNORE_ASCII,
+    ]
+    for pattern in patterns:
+        for case_mode in case_modes:
+            var matcher = Matcher(pattern, case_mode=case_mode)
+            for candidate in candidates:
+                var candidate_scalars = _scalar_values(candidate)
+                assert_true(
+                    matcher.match(candidate) == matcher.match_scalars(candidate_scalars)
+                )
+
+
 def test_pattern_retains_raw_scalars_when_ascii_folding_is_active() raises:
     var pattern = Pattern("Km", case_mode=CaseMode.IGNORE_ASCII)
     assert_equal(pattern._raw_scalars[0], UInt32(75))
@@ -198,6 +224,21 @@ def test_matching_is_deterministic_across_repeated_calls() raises:
     for _ in range(16):
         var actual = matcher.match("a-bc-abc")
         _assert_same_result(actual, expected)
+
+
+def test_match_result_is_equatable_and_writable() raises:
+    var positions: List[Int] = [0, 5]
+    var same_positions: List[Int] = [0, 5]
+    var different_positions: List[Int] = [0, 4]
+    var result = MatchResult(True, 345, positions^)
+    var same = MatchResult(True, 345, same_positions^)
+    var different = MatchResult(True, 345, different_positions^)
+
+    assert_true(result == same)
+    assert_false(result == different)
+    assert_true(
+        String(result) == "MatchResult(matched=True, score=345, positions=[0, 5])"
+    )
 
 
 def test_matcher_snapshots_a_prepared_pattern() raises:

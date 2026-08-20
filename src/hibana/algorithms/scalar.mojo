@@ -9,8 +9,9 @@ from ..scoring import (
     _BONUS_FIRST_CHAR_MULTIPLIER,
     _SCORE_ADJACENCY,
     _SCORE_MATCH,
+    _candidate_bonuses,
+    _candidate_match_scalar,
     _exact_case_score,
-    _prepare_candidate,
 )
 
 
@@ -26,7 +27,7 @@ def _transition(previous: Int, current: Int, bonus: Int) -> Int:
 
 def scalar_match(
     pattern: Pattern,
-    candidate: StringSlice,
+    candidate: Span[UInt32, _],
     scheme: Scheme = Scheme.DEFAULT,
 ) -> MatchResult:
     """Return the best prepared-scalar subsequence match in ``O(P*C)`` time.
@@ -39,11 +40,11 @@ def scalar_match(
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
-    var candidate_data = _prepare_candidate(candidate, pattern._fold_ascii, scheme)
     var pattern_count = len(pattern)
-    var candidate_count = len(candidate_data.match_scalars)
+    var candidate_count = len(candidate)
     if pattern_count > candidate_count:
         return MatchResult.no_match()
+    var bonuses = _candidate_bonuses(candidate, scheme)
 
     var suffix_scores = List[Int](
         length=pattern_count * candidate_count, fill=_UNREACHABLE
@@ -51,7 +52,7 @@ def scalar_match(
     var last_row_offset = (pattern_count - 1) * candidate_count
     for candidate_index in range(candidate_count):
         if (
-            candidate_data.match_scalars[candidate_index]
+            _candidate_match_scalar(candidate[candidate_index], pattern._fold_ascii)
             == pattern._scalars[pattern_count - 1]
         ):
             suffix_scores[last_row_offset + candidate_index] = 0
@@ -68,9 +69,7 @@ def scalar_match(
                 var suffix = suffix_scores[next_row_offset + new_gapped_index]
                 if suffix != _UNREACHABLE:
                     var adjusted_suffix = (
-                        suffix
-                        + candidate_data.bonuses[new_gapped_index]
-                        - new_gapped_index
+                        suffix + bonuses[new_gapped_index] - new_gapped_index
                     )
                     if (
                         running_gapped_max == _UNREACHABLE
@@ -79,7 +78,7 @@ def scalar_match(
                         running_gapped_max = adjusted_suffix
 
             if (
-                candidate_data.match_scalars[candidate_index]
+                _candidate_match_scalar(candidate[candidate_index], pattern._fold_ascii)
                 != pattern._scalars[pattern_index]
             ):
                 continue
@@ -91,7 +90,7 @@ def scalar_match(
                 if adjacent_suffix != _UNREACHABLE:
                     best_suffix = (
                         _SCORE_MATCH
-                        + candidate_data.bonuses[adjacent_index]
+                        + bonuses[adjacent_index]
                         + _SCORE_ADJACENCY
                         + adjacent_suffix
                     )
@@ -110,7 +109,7 @@ def scalar_match(
         var suffix = suffix_scores[candidate_index]
         if suffix == _UNREACHABLE:
             continue
-        var first_bonus = candidate_data.bonuses[candidate_index]
+        var first_bonus = bonuses[candidate_index]
         var total = (
             _SCORE_MATCH
             + _BONUS_FIRST_CHAR_MULTIPLIER * first_bonus
@@ -137,7 +136,9 @@ def scalar_match(
             var suffix = suffix_scores[row_offset + candidate_index]
             if (
                 suffix == _UNREACHABLE
-                or candidate_data.match_scalars[candidate_index]
+                or _candidate_match_scalar(
+                    candidate[candidate_index], pattern._fold_ascii
+                )
                 != pattern._scalars[pattern_index]
             ):
                 continue
@@ -145,7 +146,7 @@ def scalar_match(
                 _transition(
                     previous,
                     candidate_index,
-                    candidate_data.bonuses[candidate_index],
+                    bonuses[candidate_index],
                 )
                 + suffix
                 == required_suffix
@@ -155,5 +156,5 @@ def scalar_match(
                 break
         debug_assert(found, "suffix DP must admit a reconstruction step")
 
-    best_total += _exact_case_score(pattern, candidate_data, positions)
+    best_total += _exact_case_score(pattern, candidate, positions)
     return MatchResult(True, best_total, positions^)

@@ -1,9 +1,10 @@
 """Deterministic fuzzy-match results."""
 
 from std.collections import List
+from std.io import Writable, Writer
 
 
-struct MatchResult(Copyable):
+struct MatchResult(Copyable, Equatable, Writable):
     """A mutable value containing one match attempt's output.
 
     ``Matcher.match`` produces zero-based Unicode scalar positions in strictly
@@ -33,3 +34,33 @@ struct MatchResult(Copyable):
     def no_match() -> Self:
         """Construct the canonical non-match value."""
         return Self(False, 0, List[Int]())
+
+    def __eq__(self, other: Self) -> Bool:
+        """Return whether every public result field is equal."""
+        if (
+            self.matched != other.matched
+            or self.score != other.score
+            or len(self.positions) != len(other.positions)
+        ):
+            return False
+        for index in range(len(self.positions)):
+            if self.positions[index] != other.positions[index]:
+                return False
+        return True
+
+    def __str__(self) -> String:
+        var result = String()
+        self.write_to(result)
+        return result^
+
+    def write_to[W: Writer](self, mut writer: W):
+        """Write every public field in a readable constructor-like form."""
+        writer.write(
+            "MatchResult(matched=",
+            self.matched,
+            ", score=",
+            self.score,
+            ", positions=",
+            self.positions,
+            ")",
+        )

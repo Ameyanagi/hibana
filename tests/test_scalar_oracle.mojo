@@ -421,9 +421,10 @@ def test_fixed_seed_random_cases_match_both_oracles() raises:
         var pattern = _random_bonus_text(random_state, pattern_length)
         var candidate = _random_bonus_text(random_state, candidate_length)
         var prepared_pattern = Pattern(pattern)
-        var default_actual = Matcher(prepared_pattern, scheme=Scheme.DEFAULT).match(
-            candidate
-        )
+        var candidate_scalars = _scalar_values(candidate)
+        var default_matcher = Matcher(prepared_pattern, scheme=Scheme.DEFAULT)
+        var default_actual = default_matcher.match(candidate)
+        var default_scalars_actual = default_matcher.match_scalars(candidate_scalars)
         var default_reference = reference_match(
             prepared_pattern, candidate, Scheme.DEFAULT
         )
@@ -431,14 +432,18 @@ def test_fixed_seed_random_cases_match_both_oracles() raises:
             pattern, candidate, CaseMode.SMART_ASCII, Scheme.DEFAULT
         )
         _assert_oracle_equal(default_actual, default_expected, pattern, candidate)
+        assert_true(default_scalars_actual == default_actual)
         _assert_oracle_equal(default_reference, default_expected, pattern, candidate)
 
-        var path_actual = Matcher(prepared_pattern, scheme=Scheme.PATH).match(candidate)
+        var path_matcher = Matcher(prepared_pattern, scheme=Scheme.PATH)
+        var path_actual = path_matcher.match(candidate)
+        var path_scalars_actual = path_matcher.match_scalars(candidate_scalars)
         var path_reference = reference_match(prepared_pattern, candidate, Scheme.PATH)
         var path_expected = _brute_force_match(
             pattern, candidate, CaseMode.SMART_ASCII, Scheme.PATH
         )
         _assert_oracle_equal(path_actual, path_expected, pattern, candidate)
+        assert_true(path_scalars_actual == path_actual)
         _assert_oracle_equal(path_reference, path_expected, pattern, candidate)
 
 

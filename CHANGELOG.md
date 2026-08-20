@@ -21,6 +21,11 @@ and uses semantic versioning after the first public release.
   word, camel-case, number, delimiter, first-character, and exact-case bonuses.
 - Literal score-conformance fixtures that pin every scoring constant and both
   delimiter schemes.
+- Caller-prepared scalar matching through `Matcher.match_scalars`, sharing the
+  same no-copy scalar core as `Matcher.match` after its single decode pass.
+- Bounded `TopK` streaming selection, inspectable `Ranked` values, and
+  `Matcher.rank` convenience over caller-owned candidate spans.
+- A deterministic path-ranking example that marks matched scalar positions.
 
 ### Changed
 
@@ -29,3 +34,5 @@ and uses semantic versioning after the first public release.
 - Match scores now include the documented boundary-bonus scheme. Exact-case
   ranking bonuses are applied after position selection and never alter a
   candidate's chosen position vector.
+- `MatchResult` and `Ranked` now support field-wise equality and readable
+  `Writable` output.

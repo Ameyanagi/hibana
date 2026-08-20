@@ -450,5 +450,14 @@ def test_boundary_bonus_ranks_match_mode_above_ammo() raises:
     assert_true(match_mode.score > ammo.score)
 
 
+def test_rank_flagship_returns_match_mode_before_ammo() raises:
+    var candidates: List[String] = ["ammo", "MatchMode"]
+    var ranked = Matcher("mm").rank(candidates, 2)
+    assert_equal(ranked[0].index, 1)
+    assert_equal(ranked[0].score, 356)
+    assert_equal(ranked[1].index, 0)
+    assert_equal(ranked[1].score, 269)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

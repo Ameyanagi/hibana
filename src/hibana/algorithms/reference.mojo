@@ -2,15 +2,16 @@
 
 from std.collections import List
 
-from ..pattern import Pattern
+from ..pattern import Pattern, _scalar_values
 from ..result import MatchResult
 from ..scoring import (
     Scheme,
     _BONUS_FIRST_CHAR_MULTIPLIER,
     _SCORE_ADJACENCY,
     _SCORE_MATCH,
+    _candidate_bonuses,
+    _candidate_match_scalar,
     _exact_case_score,
-    _prepare_candidate,
 )
 
 
@@ -122,11 +123,12 @@ def reference_match(
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
-    var candidate_data = _prepare_candidate(candidate, pattern._fold_ascii, scheme)
-    if len(candidate_data.match_scalars) < len(pattern):
+    var candidate_scalars = _scalar_values(candidate)
+    if len(candidate_scalars) < len(pattern):
         return MatchResult.no_match()
+    var bonuses = _candidate_bonuses(candidate_scalars, scheme)
 
-    var candidate_count = len(candidate_data.match_scalars)
+    var candidate_count = len(candidate_scalars)
     var pattern_count = len(pattern)
     var cell_count = _checked_reference_cells(pattern_count, candidate_count)
     var unreachable = -_SCORE_MAGNITUDE_LIMIT - 1
@@ -134,10 +136,15 @@ def reference_match(
     var previous = List[Int](length=candidate_count, fill=unreachable)
 
     for candidate_index in range(candidate_count):
-        if candidate_data.match_scalars[candidate_index] == pattern._scalars[0]:
+        if (
+            _candidate_match_scalar(
+                candidate_scalars[candidate_index], pattern._fold_ascii
+            )
+            == pattern._scalars[0]
+        ):
             previous[candidate_index] = (
                 _SCORE_MATCH
-                + _BONUS_FIRST_CHAR_MULTIPLIER * candidate_data.bonuses[candidate_index]
+                + _BONUS_FIRST_CHAR_MULTIPLIER * bonuses[candidate_index]
                 - candidate_index
             )
 
@@ -145,7 +152,9 @@ def reference_match(
         var current = List[Int](length=candidate_count, fill=unreachable)
         for candidate_index in range(candidate_count):
             if (
-                candidate_data.match_scalars[candidate_index]
+                _candidate_match_scalar(
+                    candidate_scalars[candidate_index], pattern._fold_ascii
+                )
                 != pattern._scalars[pattern_index]
             ):
                 continue
@@ -156,9 +165,7 @@ def reference_match(
                 if previous[predecessor] == unreachable:
                     continue
                 var gap = candidate_index - predecessor - 1
-                var transition = (
-                    _SCORE_MATCH + candidate_data.bonuses[candidate_index] - gap
-                )
+                var transition = _SCORE_MATCH + bonuses[candidate_index] - gap
                 if gap == 0:
                     transition += _SCORE_ADJACENCY
                 var score = previous[predecessor] + transition
@@ -217,6 +224,6 @@ def reference_match(
         positions[pattern_index] = best_end
         if pattern_index > 0:
             best_end = backpointers[pattern_index * candidate_count + best_end]
-    var score = _score_positions(positions, candidate_data.bonuses)
-    score += _exact_case_score(pattern, candidate_data, positions)
+    var score = _score_positions(positions, bonuses)
+    score += _exact_case_score(pattern, candidate_scalars, positions)
     return MatchResult(True, score, positions^)
