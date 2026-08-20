@@ -28,25 +28,38 @@ def _scalar_values(text: StringSlice) -> List[UInt32]:
     return values^
 
 
-def _score(positions: List[Int]) -> Int:
+def _closed_form_score(positions: List[Int]) -> Int:
+    """Derive score from span, omitted slots, and adjacent pairs.
+
+    This intentionally differs from the production transition/recomputation
+    loops: every slot inside the first-to-last span is either matched or one
+    internal gap, and each consecutive selected pair earns one adjacency bonus.
+    """
     if len(positions) == 0:
         return 0
-    var score = len(positions) * 100 - positions[0]
+
+    var adjacent_pairs = 0
     for index in range(1, len(positions)):
-        var gap = positions[index] - positions[index - 1] - 1
-        if gap == 0:
-            score += 25
-        else:
-            score -= gap
-    return score
+        if positions[index] == positions[index - 1] + 1:
+            adjacent_pairs += 1
+    var occupied_span = positions[len(positions) - 1] - positions[0] + 1
+    var internal_gaps = occupied_span - len(positions)
+    return len(positions) * 100 - positions[0] - internal_gaps + adjacent_pairs * 25
 
 
-def _is_earlier(left: List[Int], right: List[Int]) -> Bool:
-    for index in range(len(left)):
-        if left[index] < right[index]:
+def _advance_lexicographic_combination(
+    mut positions: List[Int], candidate_count: Int
+) -> Bool:
+    """Advance a fixed-size combination in position-vector lexical order."""
+    var position_count = len(positions)
+    for reverse_index in range(position_count):
+        var index = position_count - reverse_index - 1
+        var limit = candidate_count - position_count + index
+        if positions[index] < limit:
+            positions[index] += 1
+            for suffix in range(index + 1, position_count):
+                positions[suffix] = positions[suffix - 1] + 1
             return True
-        if left[index] > right[index]:
-            return False
     return False
 
 
@@ -62,14 +75,11 @@ def _brute_force_match(pattern: StringSlice, candidate: StringSlice) -> _OracleR
     var found = False
     var best_score = 0
     var best_positions = List[Int]()
-    for mask in range(1 << len(candidate_scalars)):
-        var positions = List[Int]()
-        for candidate_index in range(len(candidate_scalars)):
-            if mask & (1 << candidate_index):
-                positions.append(candidate_index)
-        if len(positions) != len(pattern_scalars):
-            continue
-
+    var positions = List[Int](length=len(pattern_scalars), fill=0)
+    for index in range(len(positions)):
+        positions[index] = index
+    var has_combination = True
+    while has_combination:
         var matches = True
         for pattern_index in range(len(pattern_scalars)):
             if (
@@ -78,18 +88,17 @@ def _brute_force_match(pattern: StringSlice, candidate: StringSlice) -> _OracleR
             ):
                 matches = False
                 break
-        if not matches:
-            continue
-
-        var score = _score(positions)
-        if (
-            not found
-            or score > best_score
-            or (score == best_score and _is_earlier(positions, best_positions))
-        ):
-            found = True
-            best_score = score
-            best_positions = positions.copy()
+        if matches:
+            var score = _closed_form_score(positions)
+            # Combinations arrive lexicographically. Retaining the first equal
+            # score implements the tie contract without a second comparator.
+            if not found or score > best_score:
+                found = True
+                best_score = score
+                best_positions = positions.copy()
+        has_combination = _advance_lexicographic_combination(
+            positions, len(candidate_scalars)
+        )
 
     if not found:
         return _OracleResult(False, 0, List[Int]())
@@ -145,17 +154,20 @@ def test_known_oracle_states_are_independent_and_canonical() raises:
 
 def test_exhaustive_small_alphabet_matches_brute_force_oracle() raises:
     # 15 patterns (lengths 0...3) × 63 candidates (lengths 0...5) = 945
-    # deterministic comparisons. The oracle enumerates every candidate subset.
+    # deterministic comparisons. The oracle enumerates every valid combination.
+    var pair_count = 0
     for pattern_length in range(4):
         for pattern_code in range(1 << pattern_length):
             var pattern = _binary_text(pattern_code, pattern_length)
             var matcher = Matcher(pattern)
             for candidate_length in range(6):
                 for candidate_code in range(1 << candidate_length):
+                    pair_count += 1
                     var candidate = _binary_text(candidate_code, candidate_length)
                     var actual = matcher.match(candidate)
                     var expected = _brute_force_match(pattern, candidate)
                     _assert_oracle_equal(actual, expected, pattern, candidate)
+    assert_equal(pair_count, 945)
 
 
 def main() raises:

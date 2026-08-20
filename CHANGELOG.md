@@ -13,5 +13,5 @@ and uses semantic versioning after the first public release.
 - Reference tests, a basic public-API example, and an issue-sized v0.1 plan.
 - Checked reference-algorithm resource limits and explicit mutable-value
   semantics for prepared patterns, matchers, and results.
-- An independent brute-force subset oracle covering 945 exhaustive
-  small-alphabet pattern/candidate pairs.
+- An independent lexicographic-combination oracle with a closed-form score that
+  asserts all 945 exhaustive small-alphabet pattern/candidate pairs execute.
