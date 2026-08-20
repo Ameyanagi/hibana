@@ -2,7 +2,7 @@
 
 from std.collections import List
 
-from ..pattern import Pattern, _scalar_values
+from ..pattern import Pattern, _matching_scalar_values
 from ..result import MatchResult
 
 
@@ -95,12 +95,13 @@ def reference_match(pattern: Pattern, candidate: StringSlice) raises -> MatchRes
 
     This raising implementation is a deliberately resource-limited test oracle,
     not a production match path. It considers every complete subsequence under
-    the scoring contract and chooses lexicographically earlier positions on ties.
+    the scoring contract, honors the pattern's prepared ASCII case policy, and
+    chooses lexicographically earlier original-scalar positions on ties.
     """
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
-    var candidate_scalars = _scalar_values(candidate)
+    var candidate_scalars = _matching_scalar_values(candidate, pattern._fold_ascii)
     if len(candidate_scalars) < len(pattern):
         return MatchResult.no_match()
 

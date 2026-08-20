@@ -1,7 +1,7 @@
 """Prepared fuzzy matcher facade."""
 
 from .algorithms.scalar import scalar_match
-from .pattern import Pattern
+from .pattern import CaseMode, Pattern
 from .result import MatchResult
 
 
@@ -15,9 +15,13 @@ struct Matcher(Copyable):
 
     var _pattern: Pattern
 
-    def __init__(out self, query: StringSlice):
+    def __init__(
+        out self,
+        query: StringSlice,
+        case_mode: CaseMode = CaseMode.SMART_ASCII,
+    ):
         """Prepare ``query`` for repeated candidate matching."""
-        self._pattern = Pattern(query)
+        self._pattern = Pattern(query, case_mode=case_mode)
 
     def __init__(out self, pattern: Pattern):
         """Build a matcher from an already prepared pattern."""

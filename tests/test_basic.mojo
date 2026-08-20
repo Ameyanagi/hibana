@@ -1,4 +1,4 @@
-from hibana import Matcher, MatchResult, Pattern
+from hibana import CaseMode, Matcher, MatchResult, Pattern
 from hibana.algorithms.reference import reference_match
 from std.collections import List
 from std.testing import (
@@ -110,8 +110,40 @@ def test_non_match_is_canonical() raises:
     assert_equal(len(result.positions), 0)
 
 
-def test_matching_is_case_sensitive_in_first_slice() raises:
+def test_smart_case_uppercase_query_remains_exact() raises:
     assert_false(Matcher("KM").match("kamera").matched)
+
+
+def test_smart_case_lowercase_query_matches_mixed_case_candidate() raises:
+    var result = Matcher("km").match("KaMera")
+    assert_true(result.matched)
+    assert_equal(result.positions[0], 0)
+    assert_equal(result.positions[1], 2)
+    assert_equal(result.score, 199)
+
+
+def test_exact_case_mode_rejects_smart_case_match() raises:
+    assert_false(Matcher("km", case_mode=CaseMode.EXACT).match("KaMera").matched)
+
+
+def test_ignore_ascii_matches_uppercase_query_case_insensitively() raises:
+    var result = Matcher("KM", case_mode=CaseMode.IGNORE_ASCII).match("kamera")
+    assert_true(result.matched)
+    assert_equal(result.positions[0], 0)
+    assert_equal(result.positions[1], 2)
+
+
+def test_non_ascii_scalars_never_fold() raises:
+    assert_false(Matcher("é").match("É").matched)
+    assert_true(Matcher("京").match("京").matched)
+
+
+def test_pattern_retains_raw_scalars_when_ascii_folding_is_active() raises:
+    var pattern = Pattern("Km", case_mode=CaseMode.IGNORE_ASCII)
+    assert_equal(pattern._raw_scalars[0], UInt32(75))
+    assert_equal(pattern._raw_scalars[1], UInt32(109))
+    assert_equal(pattern._scalars[0], UInt32(107))
+    assert_equal(pattern._scalars[1], UInt32(109))
 
 
 def test_positions_are_unicode_scalar_indices() raises:

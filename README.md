@@ -37,16 +37,19 @@ The Mojo import is `hibana`. The eventual Conda distribution is
 The first correctness-first scalar slice is available for development:
 
 ```mojo
-from hibana import Matcher
+from hibana import CaseMode, Matcher
 
 
 def main():
     var result = Matcher("kmr").match("kamera")
+    var exact_result = Matcher("kmr", case_mode=CaseMode.EXACT).match("kamera")
 ```
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
-zero-based Unicode scalar `positions`. The current slice is exact and
-case-sensitive; it is experimental and not yet a stable release.
+zero-based Unicode scalar `positions`. Matching defaults to ASCII smart-case:
+queries containing an ASCII uppercase letter are exact, while other queries
+ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
+`Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching.
 `Matcher.match` is total and deterministic; a non-match is reported with
 `matched == false`. For pattern length `P` and candidate length `C`, the
 production path uses `O(P*C)` time and memory with no artificial resource

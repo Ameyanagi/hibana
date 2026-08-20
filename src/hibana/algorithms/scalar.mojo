@@ -2,7 +2,7 @@
 
 from std.collections import List
 
-from ..pattern import Pattern, _scalar_values
+from ..pattern import Pattern, _matching_scalar_values
 from ..result import MatchResult
 
 
@@ -17,17 +17,17 @@ def _transition(previous: Int, current: Int) -> Int:
 
 
 def scalar_match(pattern: Pattern, candidate: StringSlice) -> MatchResult:
-    """Return the best exact-scalar subsequence match in ``O(P*C)`` time.
+    """Return the best prepared-scalar subsequence match in ``O(P*C)`` time.
 
     Backward dynamic-programming rows retain each optimal suffix score. A
     forward greedy walk then chooses the first position that preserves that
     optimum at every pattern index, yielding the lexicographically earliest
-    optimal position vector.
+    optimal position vector. Positions index the original candidate scalars.
     """
     if pattern.is_empty():
         return MatchResult(True, 0, List[Int]())
 
-    var candidate_scalars = _scalar_values(candidate)
+    var candidate_scalars = _matching_scalar_values(candidate, pattern._fold_ascii)
     var pattern_count = len(pattern)
     var candidate_count = len(candidate_scalars)
     if pattern_count > candidate_count:

@@ -1,6 +1,6 @@
 """Independent exhaustive oracle checks for the scalar matcher contract."""
 
-from hibana import Matcher, MatchResult, Pattern
+from hibana import CaseMode, Matcher, MatchResult, Pattern
 from hibana.algorithms.reference import reference_match
 from std.collections import List
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -31,6 +31,26 @@ def _scalar_values(text: StringSlice) -> List[UInt32]:
     for scalar in text.codepoints():
         values.append(scalar.to_u32())
     return values^
+
+
+def _fold_ascii_scalar(scalar: UInt32) -> UInt32:
+    if scalar >= UInt32(65) and scalar <= UInt32(90):
+        return scalar + UInt32(32)
+    return scalar
+
+
+def _contains_ascii_uppercase(scalars: List[UInt32]) -> Bool:
+    for scalar in scalars:
+        if scalar >= UInt32(65) and scalar <= UInt32(90):
+            return True
+    return False
+
+
+def _oracle_folds_ascii(pattern_scalars: List[UInt32], case_mode: CaseMode) -> Bool:
+    return case_mode == CaseMode.IGNORE_ASCII or (
+        case_mode == CaseMode.SMART_ASCII
+        and not _contains_ascii_uppercase(pattern_scalars)
+    )
 
 
 def _closed_form_score(positions: List[Int]) -> Int:
@@ -68,10 +88,19 @@ def _advance_lexicographic_combination(
     return False
 
 
-def _brute_force_match(pattern: StringSlice, candidate: StringSlice) -> _OracleResult:
+def _brute_force_match(
+    pattern: StringSlice,
+    candidate: StringSlice,
+    case_mode: CaseMode = CaseMode.SMART_ASCII,
+) -> _OracleResult:
     """Enumerate candidate subsets without using Hibana implementation details."""
     var pattern_scalars = _scalar_values(pattern)
     var candidate_scalars = _scalar_values(candidate)
+    if _oracle_folds_ascii(pattern_scalars, case_mode):
+        for index in range(len(pattern_scalars)):
+            pattern_scalars[index] = _fold_ascii_scalar(pattern_scalars[index])
+        for index in range(len(candidate_scalars)):
+            candidate_scalars[index] = _fold_ascii_scalar(candidate_scalars[index])
     if len(pattern_scalars) == 0:
         return _OracleResult(True, 0, List[Int]())
     if len(pattern_scalars) > len(candidate_scalars):
@@ -110,14 +139,26 @@ def _brute_force_match(pattern: StringSlice, candidate: StringSlice) -> _OracleR
     return _OracleResult(True, best_score, best_positions^)
 
 
-def _binary_text(code: Int, length: Int) -> String:
+def _mixed_case_ternary_text(code: Int, length: Int) -> String:
     var text = String()
-    for index in range(length):
-        if code & (1 << index):
+    var remaining = code
+    for _ in range(length):
+        var scalar = remaining % 3
+        remaining = remaining // 3
+        if scalar == 0:
+            text += "a"
+        elif scalar == 1:
             text += "b"
         else:
-            text += "a"
+            text += "A"
     return text^
+
+
+def _ternary_code_count(length: Int) -> Int:
+    var count = 1
+    for _ in range(length):
+        count *= 3
+    return count
 
 
 def _next_xorshift64(mut state: UInt64) -> UInt64:
@@ -129,16 +170,18 @@ def _next_xorshift64(mut state: UInt64) -> UInt64:
     return state
 
 
-def _random_ternary_text(mut state: UInt64, length: Int) -> String:
+def _random_mixed_case_text(mut state: UInt64, length: Int) -> String:
     var text = String()
     for _ in range(length):
-        var scalar = _next_xorshift64(state) % 3
+        var scalar = _next_xorshift64(state) % 4
         if scalar == 0:
             text += "a"
         elif scalar == 1:
             text += "b"
+        elif scalar == 2:
+            text += "A"
         else:
-            text += "c"
+            text += "B"
     return text^
 
 
@@ -171,6 +214,19 @@ def _assert_oracle_equal(
             )
 
 
+def _assert_three_way_case_mode(
+    pattern: StringSlice,
+    candidate: StringSlice,
+    case_mode: CaseMode,
+) raises:
+    var prepared_pattern = Pattern(pattern, case_mode=case_mode)
+    var actual = Matcher(prepared_pattern).match(candidate)
+    var reference_result = reference_match(prepared_pattern, candidate)
+    var expected = _brute_force_match(pattern, candidate, case_mode)
+    _assert_oracle_equal(actual, expected, pattern, candidate)
+    _assert_oracle_equal(reference_result, expected, pattern, candidate)
+
+
 def test_known_oracle_states_are_independent_and_canonical() raises:
     var no_match = _brute_force_match("ab", "aaa")
     assert_false(no_match.matched)
@@ -190,25 +246,27 @@ def test_known_oracle_states_are_independent_and_canonical() raises:
 
 
 def test_exhaustive_small_alphabet_matches_both_oracles() raises:
-    # 15 patterns (lengths 0...3) × 63 candidates (lengths 0...5) = 945
+    # 40 patterns (lengths 0...3) × 364 candidates (lengths 0...5) = 14,560
     # three-way comparisons. The brute-force oracle enumerates every valid
-    # combination independently of both dynamic-programming implementations.
+    # mixed-case combination independently of both DP implementations.
     var pair_count = 0
     for pattern_length in range(4):
-        for pattern_code in range(1 << pattern_length):
-            var pattern = _binary_text(pattern_code, pattern_length)
+        for pattern_code in range(_ternary_code_count(pattern_length)):
+            var pattern = _mixed_case_ternary_text(pattern_code, pattern_length)
             var prepared_pattern = Pattern(pattern)
             var matcher = Matcher(prepared_pattern)
             for candidate_length in range(6):
-                for candidate_code in range(1 << candidate_length):
+                for candidate_code in range(_ternary_code_count(candidate_length)):
                     pair_count += 1
-                    var candidate = _binary_text(candidate_code, candidate_length)
+                    var candidate = _mixed_case_ternary_text(
+                        candidate_code, candidate_length
+                    )
                     var actual = matcher.match(candidate)
                     var reference_result = reference_match(prepared_pattern, candidate)
                     var expected = _brute_force_match(pattern, candidate)
                     _assert_oracle_equal(actual, expected, pattern, candidate)
                     _assert_oracle_equal(reference_result, expected, pattern, candidate)
-    assert_equal(pair_count, 945)
+    assert_equal(pair_count, 14_560)
 
 
 def test_fixed_seed_random_cases_match_both_oracles() raises:
@@ -224,14 +282,26 @@ def test_fixed_seed_random_cases_match_both_oracles() raises:
             pattern_length = Int(_next_xorshift64(random_state) % 5)
             candidate_length = Int(_next_xorshift64(random_state) % 10)
 
-        var pattern = _random_ternary_text(random_state, pattern_length)
-        var candidate = _random_ternary_text(random_state, candidate_length)
+        var pattern = _random_mixed_case_text(random_state, pattern_length)
+        var candidate = _random_mixed_case_text(random_state, candidate_length)
         var prepared_pattern = Pattern(pattern)
         var actual = Matcher(prepared_pattern).match(candidate)
         var reference_result = reference_match(prepared_pattern, candidate)
         var expected = _brute_force_match(pattern, candidate)
         _assert_oracle_equal(actual, expected, pattern, candidate)
         _assert_oracle_equal(reference_result, expected, pattern, candidate)
+
+
+def test_explicit_case_modes_match_both_oracles() raises:
+    _assert_three_way_case_mode("a", "A", CaseMode.EXACT)
+    _assert_three_way_case_mode("A", "a", CaseMode.EXACT)
+    _assert_three_way_case_mode("Ab", "aB", CaseMode.EXACT)
+    _assert_three_way_case_mode("aB", "xaBy", CaseMode.EXACT)
+
+    _assert_three_way_case_mode("a", "A", CaseMode.IGNORE_ASCII)
+    _assert_three_way_case_mode("A", "a", CaseMode.IGNORE_ASCII)
+    _assert_three_way_case_mode("Ab", "xxaB", CaseMode.IGNORE_ASCII)
+    _assert_three_way_case_mode("éA", "Éa", CaseMode.IGNORE_ASCII)
 
 
 def main() raises:

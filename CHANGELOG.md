@@ -9,9 +9,16 @@ and uses semantic versioning after the first public release.
 
 - Initial experimental repository scaffold.
 - Prepared `Pattern` and reusable `Matcher` values.
-- Deterministic exact-scalar matching with scores and candidate positions.
+- Explicit `CaseMode.EXACT`, `CaseMode.IGNORE_ASCII`, and
+  `CaseMode.SMART_ASCII` matching policies.
+- Deterministic scalar matching with scores and candidate positions.
 - Reference tests, a basic public-API example, and an issue-sized v0.1 plan.
 - Checked reference-algorithm resource limits and explicit mutable-value
   semantics for prepared patterns, matchers, and results.
 - An independent lexicographic-combination oracle with a closed-form score that
-  asserts all 945 exhaustive small-alphabet pattern/candidate pairs execute.
+  asserts all 14,560 exhaustive mixed-case pattern/candidate pairs execute.
+
+### Changed
+
+- Matching now defaults to ASCII smart-case instead of exact-case. Pass
+  `case_mode=CaseMode.EXACT` to preserve the previous behavior.
