@@ -1,1 +1,5 @@
-# Public exports will be added with the first implemented and tested API.
+"""Hibana's small public fuzzy-matching API."""
+
+from .matcher import Matcher
+from .pattern import Pattern
+from .result import MatchResult

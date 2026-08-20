@@ -21,6 +21,12 @@ generated tables, platform details, and backend implementations remain in
 their owning modules. Generic Mojo-native buffers, spans, strings, and
 collections are preferred over an ecosystem-specific universal container.
 
+`Pattern` has one canonical prepared scalar sequence; no cached source string
+can diverge from it. `Matcher` snapshots that value at construction. Mojo 1.0
+struct fields are externally mutable even when underscore-prefixed, so public
+documentation treats these types as mutable value snapshots and does not claim
+post-mutation invariants. Underscore storage remains outside the stable API.
+
 ## Data flow
 
 Input validation occurs at the public boundary. Internal layers operate on
@@ -28,3 +34,9 @@ explicit typed values, produce deterministic outputs for deterministic inputs,
 and report invalid state rather than silently replacing it with a default.
 I/O, clocks, randomness, terminal queries, filesystem access, and accelerator
 selection stay at explicit effect or backend boundaries.
+
+The correctness-first scalar algorithm is a bounded, fallible reference oracle.
+It checks state-table, transition, tie-break, flattened-index, and score bounds
+before allocating or evaluating. A future production scalar implementation must
+preserve its match, score, and tie semantics without inheriting its polynomial
+complexity.

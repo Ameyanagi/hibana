@@ -34,8 +34,24 @@ The Mojo import is `hibana`. The eventual Conda distribution is
 `mojo-hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 
-The current scaffold includes only an internal smoke marker. Nothing is
-re-exported as a stable public API yet.
+The first correctness-first scalar slice is available for development:
+
+```mojo
+from hibana import Matcher
+
+var result = Matcher("kmr").match("kamera")
+```
+
+`MatchResult` reports `matched`, a deterministic integer `score`, and
+zero-based Unicode scalar `positions`. The current slice is exact and
+case-sensitive; it is experimental and not yet a stable release. Matching is
+fallible because the polynomial reference oracle rejects workloads beyond its
+documented state, transition, tie-break, and score bounds rather than risking
+overflow or unbounded allocation. See the v0.1 plan for exact limits.
+
+The exported structs are mutable Mojo value types. Matcher construction
+snapshots its canonical prepared pattern; caller mutation of a returned result
+changes that result value and is not revalidated by Hibana.
 
 ## Repository map
 
@@ -47,7 +63,8 @@ re-exported as a stable public API yet.
 - `conda.recipe/`: local Rattler build recipe
 
 See [the architecture](docs/architecture.md), [design principles](docs/design.md),
-and [roadmap](docs/roadmap.md) before proposing a new dependency or feature.
+and [v0.1 execution plan](docs/v0.1-plan.md) before proposing a new dependency
+or feature.
 
 ## License
 
