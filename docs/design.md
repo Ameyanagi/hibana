@@ -30,6 +30,12 @@ contracts and sparse dependencies. Generated tables are acceptable when their
 sources, Unicode or data version, licenses, checksums, and deterministic update
 procedure are committed. Consumers must not need the generator toolchain.
 
+Hibana follows the fzf-register query model: a string query splits on ASCII
+space, tab, LF, and CR and ANDs its fuzzy atoms by default. Literal whitespace
+remains available through the single-pattern `Matcher(Pattern(...))`
+constructor. This query-layer decision does not broaden case handling; folding
+remains ASCII-only and smart case is decided independently for each atom.
+
 ## Out of scope
 
 Japanese, pinyin, Hangul, terminal UI, filesystem traversal, and CJK phonetic generation are outside this package.

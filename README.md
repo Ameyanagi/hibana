@@ -39,6 +39,12 @@ subcommand for your program).
 
 ## Quickstart
 
+String queries use whitespace-AND matching by default: Hibana splits a query on
+ASCII space, tab, LF, and CR, fuzzily matches every word somewhere in the same
+candidate, sums the word scores, and merges their positions. Construct a
+single prepared pattern, such as `Matcher(Pattern("a b"))`, when whitespace
+must be matched literally.
+
 ```mojo
 from hibana import Matcher, Scheme
 from std.collections import List
@@ -51,11 +57,14 @@ def main() raises:
         "tests/test_basic.mojo",
         "README.md",
     ]
-    var matcher = Matcher("hm", scheme=Scheme.PATH)
-    var ranked = matcher.rank(paths, k=5)
+    var matcher = Matcher("hibana mojo", scheme=Scheme.PATH)
+    var ranked = matcher.rank(paths)
     for item in ranked:
         print(item.score, item.positions, paths[item.index])
 ```
+
+`rank(paths)` returns every match in score order and does not raise. Pass
+`k=5`, for example, to use bounded top-K storage and retain only the best five.
 
 ## Rank and highlight file paths
 
@@ -104,21 +113,28 @@ The Mojo import is `hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
-zero-based Unicode scalar `positions`. Matching defaults to ASCII smart-case:
-queries containing an ASCII uppercase letter are exact, while other queries
-ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
-`Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching.
+zero-based Unicode scalar `positions`. A string query is split into fuzzy words
+on ASCII space, tab, LF, and CR; every word must match, each word's score is
+added, and all selected positions are merged in ascending order without
+duplicates. Smart
+case is decided independently for each word: a word containing an ASCII
+uppercase letter is exact, while other words ignore ASCII letter case.
+Non-ASCII scalars always compare exactly, and
+`Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching. Use
+`Matcher(Pattern("a b"))` as the single-atom escape hatch for a literal space.
 `Matcher.match` is total and deterministic; a non-match is reported with
-`matched == false`. For pattern length `P` and candidate length `C`, the
-production path uses `O(P*C)` time and memory with no artificial resource
-limits. The bounded exhaustive dynamic program survives only as an internal
-test oracle and is not used by the production path.
+`matched == false`. For total atom length `P` and candidate length `C`, the
+production path uses `O(P*C)` time, with one atom's dynamic-programming storage
+live at a time and no artificial resource limits. The bounded exhaustive
+dynamic program survives only as an internal test oracle and is not used by
+the production path.
 
 `Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
-positions into that span without copying it. `Matcher.rank` uses bounded
-`O(K)` storage and returns matches by score descending, then input index
-ascending. `TopK` exposes the same streaming policy when candidates do not
-already live in a single span.
+positions into that span without copying it. `Matcher.rank(candidates)` is a
+non-raising all-matches operation; `Matcher.rank(candidates, k=K)` uses bounded
+`O(K)` storage. Both return matches by score descending, then input index
+ascending, and accept `List[String]` directly. `TopK` exposes the bounded
+streaming policy when candidates do not already live in a single span.
 
 `Scheme.DEFAULT` rewards whitespace, common delimiters, word starts,
 camel-case, and number transitions. `Scheme.PATH` treats `/` and `\` as the
@@ -128,8 +144,8 @@ and one-point gap terms, and add fixed context and exact-case bonuses. See the
 formula, and the ranking-only exact-case rule.
 
 The exported structs are mutable Mojo value types. Matcher construction
-snapshots its canonical prepared pattern; caller mutation of a returned result
-changes that result value and is not revalidated by Hibana.
+snapshots its prepared atoms; caller mutation of a returned result changes that
+result value and is not revalidated by Hibana.
 
 ## Scope
 

@@ -1,6 +1,6 @@
 """Literal score fixtures pin Hibana's public scoring contract."""
 
-from hibana import CaseMode, Matcher, Scheme
+from hibana import CaseMode, Matcher, Pattern, Scheme
 from std.collections import List
 from std.testing import TestSuite, assert_equal, assert_true
 
@@ -335,16 +335,6 @@ def _fixtures() -> List[_ScoreFixture]:
     )
     fixtures.append(
         _ScoreFixture(
-            " ",
-            " ",
-            CaseMode.EXACT,
-            Scheme.DEFAULT,
-            200,  # (100 + 50) + 50; matching whitespace itself earns 50
-            _one(0),
-        )
-    )
-    fixtures.append(
-        _ScoreFixture(
             "ab",
             "a\\b",
             CaseMode.EXACT,
@@ -439,6 +429,18 @@ def test_score_conformance_table() raises:
         assert_equal(len(result.positions), len(fixture.expected_positions))
         for index in range(len(result.positions)):
             assert_equal(result.positions[index], fixture.expected_positions[index])
+
+
+def test_literal_whitespace_pattern_pins_the_whitespace_bonus() raises:
+    # A whitespace-only string query is a zero-atom match-all under the
+    # whitespace-AND semantics, so the literal-space scoring pin uses the
+    # single-atom Pattern escape hatch.
+    var matcher = Matcher(Pattern(" ", case_mode=CaseMode.EXACT))
+    var result = matcher.match(" ")
+    assert_true(result.matched)
+    assert_equal(result.score, 200)  # (100 + 50) + 50; whitespace itself earns 50
+    assert_equal(len(result.positions), 1)
+    assert_equal(result.positions[0], 0)
 
 
 def test_boundary_bonus_ranks_match_mode_above_ammo() raises:

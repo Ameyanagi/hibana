@@ -25,11 +25,21 @@ and uses semantic versioning after the first public release.
   same no-copy scalar core as `Matcher.match` after its single decode pass.
 - Bounded `TopK` streaming selection, inspectable `Ranked` values, and
   `Matcher.rank` convenience over caller-owned candidate spans.
+- Non-raising no-`k` `Matcher.rank` overloads that return every match, plus
+  direct `List[String]` and bare-list-literal ranking ergonomics.
 - A deterministic path-ranking example that marks matched scalar positions.
 - A README honesty check that extracts and compiles every fenced Mojo program.
 
 ### Changed
 
+- **Breaking:** string-query matching now uses fzf-register whitespace-AND
+  semantics. Previously, `Matcher("foo bar")` searched for one fuzzy pattern
+  containing a literal space; it now requires both independently prepared
+  words to match, sums their scores, and merges their positions. Use
+  `Matcher(Pattern("foo bar"))` for the old literal-space meaning.
+- **Breaking:** `Matcher.rank(candidates, k)` is now the explicitly bounded,
+  raising form, while `Matcher.rank(candidates)` ranks all matches without
+  raising. Invalid `k` errors now name `rank` and recommend omitting `k`.
 - Matching now defaults to ASCII smart-case instead of exact-case. Pass
   `case_mode=CaseMode.EXACT` to preserve the previous behavior.
 - Match scores now include the documented boundary-bonus scheme. Exact-case
