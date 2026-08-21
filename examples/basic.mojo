@@ -1,5 +1,10 @@
-from hibana._scaffold import scaffold_name
+from hibana import Matcher
 
 
 def main():
-    print(scaffold_name(), "is an experimental scaffold; no API is released yet.")
+    var matcher = Matcher("kmr")
+    var result = matcher.match("kamera")
+
+    print("matched:", result.matched)
+    print("score:", result.score)
+    print("positions:", result.positions)

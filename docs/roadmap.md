@@ -7,6 +7,9 @@
 - Add unit, reference-value, and property/invariant coverage.
 - Build and test the precompiled package on supported targets.
 
+The dependency-ordered, issue-sized execution plan and release gates live in
+[the v0.1 plan](v0.1-plan.md).
+
 ## v0.2 — Usability
 
 - Add ergonomic APIs only after v0.1 usage demonstrates repeated friction.
