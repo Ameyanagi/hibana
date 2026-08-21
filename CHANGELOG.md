@@ -26,6 +26,7 @@ and uses semantic versioning after the first public release.
 - Bounded `TopK` streaming selection, inspectable `Ranked` values, and
   `Matcher.rank` convenience over caller-owned candidate spans.
 - A deterministic path-ranking example that marks matched scalar positions.
+- A README honesty check that extracts and compiles every fenced Mojo program.
 
 ### Changed
 
@@ -36,3 +37,5 @@ and uses semantic versioning after the first public release.
   candidate's chosen position vector.
 - `MatchResult` and `Ranked` now support field-wise equality and readable
   `Writable` output.
+- The README now follows the consumer-first front-door structure with install,
+  copy-compilable quickstart, and real-task path-ranking guidance.

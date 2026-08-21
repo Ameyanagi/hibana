@@ -1,58 +1,107 @@
 # Hibana
 
-> **Experimental — API not yet released.**
-
 High-performance fuzzy matching for Mojo.
 
-## Scope
+> **Experimental — API not yet released.**
 
-Hibana owns reusable deterministic fuzzy matching and ranking, with no language, filesystem, or user-interface policy.
+## Install
 
-The first implementation milestone is intentionally narrow: implement a correctness-first scalar matcher with stable scores, matched positions, case policy, path-aware scoring, and bounded top-K selection.
-The project is independently installable and does not require any application
-from the wider ecosystem.
+In a Pixi project, add the Hibana channel to the `channels` list in `pixi.toml`:
 
-## Development
-
-Install [Pixi](https://pixi.sh/), then run:
-
-```sh
-pixi install --locked
-pixi run check
-pixi run example
-pixi run example-rank
+```toml
+[workspace]
+channels = [
+    "https://ameyanagi.github.io/mojo-channel",
+    "https://conda.modular.com/max",
+    "conda-forge",
+]
 ```
 
-The exact stable Mojo compiler and all development dependencies are captured in
-`pixi.lock`. Runtime and library code is Mojo-first and pure Mojo wherever
-practical. Build-time data generation may use another language when justified,
-but generated outputs must be deterministic, checksum-pinned, licensed, and
-documented.
+Then add Hibana:
 
-## Package
+```sh
+pixi add mojo-hibana
+```
 
-The Mojo import is `hibana`. The eventual Conda distribution is
-`mojo-hibana`. Source lives under `src/hibana/`, whose
-`__init__.mojo` defines the package boundary.
+`mojo-hibana` is the consumer package spelling on the hosted channel. Hibana is
+still experimental; a source checkout is the fallback that always works today:
 
-The public API ranks caller-owned candidates without buffering every match:
+```sh
+git clone https://github.com/Ameyanagi/hibana.git
+cd hibana
+pixi install --locked
+pixi run mojo run -I src your_file.mojo
+```
+
+From another checkout, point Mojo at Hibana's source directory with
+`mojo run -I /path/to/hibana/src your_file.mojo` (or the equivalent `mojo`
+subcommand for your program).
+
+## Quickstart
 
 ```mojo
-from hibana import CaseMode, Matcher, Scheme
+from hibana import Matcher, Scheme
 from std.collections import List
 
 
 def main() raises:
     var paths: List[String] = [
-        "src/hibana/matcher.mojo", "src/hibana/scoring.mojo",
-        "tests/test_basic.mojo", "README.md",
+        "src/hibana/matcher.mojo",
+        "src/hibana/scoring.mojo",
+        "tests/test_basic.mojo",
+        "README.md",
     ]
-    var matcher = Matcher("hm", scheme=Scheme.PATH)  # Smart case is the default.
+    var matcher = Matcher("hm", scheme=Scheme.PATH)
     var ranked = matcher.rank(paths, k=5)
-    for match in ranked:
-        print(match.score, match.positions, paths[match.index])
-    _ = Matcher("HM", case_mode=CaseMode.EXACT, scheme=Scheme.PATH)  # Escape hatch.
+    for item in ranked:
+        print(item.score, item.positions, paths[item.index])
 ```
+
+## Rank and highlight file paths
+
+Use `Scheme.PATH` to rank file paths and mark the matched Unicode scalar
+positions:
+
+```mojo
+from hibana import Matcher, Scheme
+from std.collections import List
+
+
+def _position_markers(text: StringSlice, positions: List[Int]) -> String:
+    var markers = String()
+    var position_cursor = 0
+    var scalar_index = 0
+    for _ in text.codepoints():
+        if (
+            position_cursor < len(positions)
+            and positions[position_cursor] == scalar_index
+        ):
+            markers += "^"
+            position_cursor += 1
+        else:
+            markers += " "
+        scalar_index += 1
+    return markers^
+
+
+def main() raises:
+    var paths: List[String] = [
+        "src/hibana/matcher.mojo",
+        "src/hibana/pattern.mojo",
+        "tests/test_basic.mojo",
+        "README.md",
+        "examples/rank_paths.mojo",
+    ]
+    var ranked = Matcher("mojo", scheme=Scheme.PATH).rank(paths, k=5)
+    for item in ranked:
+        print(paths[item.index], " score=", item.score)
+        print(_position_markers(paths[item.index], item.positions))
+```
+
+## API contract
+
+The Mojo import is `hibana`. Source lives under `src/hibana/`, whose
+`__init__.mojo` defines the package boundary.
 
 `MatchResult` reports `matched`, a deterministic integer `score`, and
 zero-based Unicode scalar `positions`. Matching defaults to ASCII smart-case:
@@ -81,6 +130,34 @@ formula, and the ranking-only exact-case rule.
 The exported structs are mutable Mojo value types. Matcher construction
 snapshots its canonical prepared pattern; caller mutation of a returned result
 changes that result value and is not revalidated by Hibana.
+
+## Scope
+
+Hibana owns reusable deterministic fuzzy matching and ranking, with no
+language, filesystem, or user-interface policy.
+
+The first implementation milestone is intentionally narrow: implement a
+correctness-first scalar matcher with stable scores, matched positions, case
+policy, path-aware scoring, and bounded top-K selection. The project is
+independently installable and does not require any application from the wider
+ecosystem.
+
+## Development
+
+Install [Pixi](https://pixi.sh/), then run:
+
+```sh
+pixi install --locked
+pixi run check
+pixi run example
+pixi run example-rank
+```
+
+The exact stable Mojo compiler and all development dependencies are captured in
+`pixi.lock`. Runtime and library code is Mojo-first and pure Mojo wherever
+practical. Build-time data generation may use another language when justified,
+but generated outputs must be deterministic, checksum-pinned, licensed, and
+documented.
 
 ## Repository map
 
