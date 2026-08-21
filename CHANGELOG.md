@@ -37,5 +37,7 @@ and uses semantic versioning after the first public release.
   candidate's chosen position vector.
 - `MatchResult` and `Ranked` now support field-wise equality and readable
   `Writable` output.
+- Validation errors now report the offending arguments and limits with clearer
+  recovery guidance.
 - The README now follows the consumer-first front-door structure with install,
   copy-compilable quickstart, and real-task path-ranking guidance.

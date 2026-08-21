@@ -78,13 +78,39 @@ def _naive_rank(matcher: Matcher, candidates: List[String], k: Int) -> List[Rank
 
 def test_top_k_validates_k_with_teaching_message() raises:
     with assert_raises(
-        contains="TopK requires k >= 1, got 0; use match() for single-candidate checks"
+        contains=(
+            "TopK requires k >= 1, got 0; construct TopK with the number of matches to"
+            " retain, or use Matcher.rank without k to keep every match"
+        )
     ):
         _ = TopK(0)
     with assert_raises(
-        contains="TopK requires k >= 1, got -3; use match() for single-candidate checks"
+        contains=(
+            "TopK requires k >= 1, got -3; construct TopK with the number of matches to"
+            " retain, or use Matcher.rank without k to keep every match"
+        )
     ):
         _ = TopK(-3)
+
+
+def test_top_k_validate_reports_offending_storage_values() raises:
+    var over_retained = TopK(1)
+    var first_positions = List[Int]()
+    var second_positions = List[Int]()
+    over_retained._heap.append(Ranked(0, 20, first_positions^))
+    over_retained._heap.append(Ranked(1, 10, second_positions^))
+    with assert_raises(contains="retained 2 results but k is 1"):
+        over_retained.validate()
+
+    var unordered = TopK(3)
+    var parent_positions = List[Int]()
+    var child_positions = List[Int]()
+    unordered._heap.append(Ranked(0, 20, parent_positions^))
+    unordered._heap.append(Ranked(1, 10, child_positions^))
+    with assert_raises(contains="heap order violated"):
+        unordered.validate()
+    with assert_raises(contains="child 1"):
+        unordered.validate()
 
 
 def test_rank_k_one_keeps_only_the_best_match() raises:

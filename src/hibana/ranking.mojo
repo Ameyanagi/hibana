@@ -87,7 +87,10 @@ struct TopK(Copyable):
                 String(
                     "TopK requires k >= 1, got ",
                     k,
-                    "; use match() for single-candidate checks",
+                    (
+                        "; construct TopK with the number of matches to retain, or use"
+                        " Matcher.rank without k to keep every match"
+                    ),
                 )
             )
         self._k = k
@@ -100,15 +103,38 @@ struct TopK(Copyable):
                 String(
                     "TopK requires k >= 1, got ",
                     self._k,
-                    "; use match() for single-candidate checks",
+                    (
+                        "; construct TopK with the number of matches to retain, or use"
+                        " Matcher.rank without k to keep every match"
+                    ),
                 )
             )
         if len(self._heap) > self._k:
-            raise Error("TopK retained more than k results")
+            raise Error(
+                String(
+                    "TopK retained ",
+                    len(self._heap),
+                    " results but k is ",
+                    self._k,
+                    "; truncate the heap or rebuild with TopK(k)",
+                )
+            )
         for child in range(1, len(self._heap)):
             var parent = (child - 1) // 2
             if _is_worse(self._heap[child], self._heap[parent]):
-                raise Error("TopK storage does not satisfy root-worst heap order")
+                raise Error(
+                    String(
+                        "TopK heap order violated: child ",
+                        child,
+                        " = ",
+                        String(self._heap[child]),
+                        " is worse than parent ",
+                        parent,
+                        " = ",
+                        String(self._heap[parent]),
+                        "; rebuild the heap or undo the direct mutation",
+                    )
+                )
 
     def _swap(mut self, left: Int, right: Int):
         self._heap.swap_elements(left, right)
