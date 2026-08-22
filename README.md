@@ -2,7 +2,7 @@
 
 High-performance fuzzy matching for Mojo.
 
-> **Experimental — API not yet released.**
+> **Experimental — API may change before v1.0.**
 
 ## Install
 
@@ -177,7 +177,7 @@ documented.
 
 ## Package
 
-The Mojo import is `hibana`. The eventual Conda distribution is
+The Mojo import is `hibana`. The Conda distribution is
 `mojo-hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 

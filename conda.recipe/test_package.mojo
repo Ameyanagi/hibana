@@ -16,6 +16,12 @@ def main() raises:
     assert_equal(result.positions[1], 2)
     assert_equal(result.positions[2], 4)
 
+    var rank_candidates: List[String] = ["other", "kamera"]
+    var ranked = Matcher(pattern).rank(rank_candidates, k=1)
+    assert_equal(len(ranked), 1)
+    assert_equal(ranked[0].index, 1)
+    assert_equal(ranked[0].score, result.score)
+
     # Keep the installed-package gate ahead of Yuragi's prepared-index use:
     # this must resolve from the built .mojoc, never a sibling source tree.
     var prepared = PreparedCandidate("kamera")

@@ -5,6 +5,8 @@ and uses semantic versioning after the first public release.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-22
+
 ### Added
 
 - Initial experimental repository scaffold.
@@ -70,3 +72,6 @@ and uses semantic versioning after the first public release.
   recovery guidance.
 - The README now follows the consumer-first front-door structure with install,
   copy-compilable quickstart, and real-task path-ranking guidance.
+
+[Unreleased]: https://github.com/Ameyanagi/hibana/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Ameyanagi/hibana/releases/tag/v0.1.0
