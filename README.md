@@ -2,7 +2,7 @@
 
 High-performance fuzzy matching for Mojo.
 
-> **Experimental — API not yet released.**
+> **Experimental — API may change before v1.0.**
 
 ## Install
 
@@ -16,6 +16,9 @@ channels = [
     "conda-forge",
 ]
 ```
+
+Keep this order: the ecosystem package channel has highest priority, Modular's
+`max` channel supplies the Mojo compiler, and conda-forge supplies shared tools.
 
 Then add Hibana:
 
@@ -177,7 +180,7 @@ documented.
 
 ## Package
 
-The Mojo import is `hibana`. The eventual Conda distribution is
+The Mojo import is `hibana`. The Conda distribution is
 `mojo-hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 
