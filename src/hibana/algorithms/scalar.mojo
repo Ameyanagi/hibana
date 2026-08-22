@@ -3,8 +3,9 @@
 from std.collections import List
 
 from ..pattern import Pattern
-from ..result import MatchResult
+from ..result import MatchResult, MatchScore
 from ..scoring import (
+    _BONUS_EXACT_CASE,
     Scheme,
     _BONUS_FIRST_CHAR_MULTIPLIER,
     _SCORE_ADJACENCY,
@@ -18,6 +19,17 @@ from ..scoring import (
 comptime _UNREACHABLE = Int.MIN // 4
 
 
+struct _MatchStart(Copyable):
+    """Optimal first position and score before the exact-case bonus."""
+
+    var position: Int
+    var score: Int
+
+    def __init__(out self, position: Int, score: Int):
+        self.position = position
+        self.score = score
+
+
 def _transition(previous: Int, current: Int, bonus: Int) -> Int:
     var gap = current - previous - 1
     if gap == 0:
@@ -25,30 +37,50 @@ def _transition(previous: Int, current: Int, bonus: Int) -> Int:
     return _SCORE_MATCH + bonus - gap
 
 
-def scalar_match(
+def _is_subsequence_match(
     pattern: Pattern,
     candidate: Span[UInt32, _],
-    scheme: Scheme = Scheme.DEFAULT,
-) -> MatchResult:
-    """Return the best prepared-scalar subsequence match in ``O(P*C)`` time.
-
-    Backward dynamic-programming rows retain each optimal suffix score. A
-    forward greedy walk then chooses the first position that preserves that
-    optimum at every pattern index, yielding the lexicographically earliest
-    optimal position vector. Positions index the original candidate scalars.
-    """
+) -> Bool:
+    """Reject non-matches with one allocation-free candidate scan."""
     if pattern.is_empty():
-        return MatchResult(True, 0, List[Int]())
+        return True
+    if len(pattern) > len(candidate):
+        return False
 
+    var pattern_index = 0
+    for candidate_index in range(len(candidate)):
+        if (
+            _candidate_match_scalar(candidate[candidate_index], pattern._fold_ascii)
+            == pattern._scalars[pattern_index]
+        ):
+            pattern_index += 1
+            if pattern_index == len(pattern):
+                return True
+    return False
+
+
+def _reset_scores(mut suffix_scores: List[Int], cell_count: Int):
+    """Reset logical workspace length while retaining its allocation."""
+    if cell_count > suffix_scores.capacity():
+        var target_capacity = cell_count
+        if suffix_scores.capacity() <= Int.MAX // 2:
+            target_capacity = max(cell_count, max(1, suffix_scores.capacity() * 2))
+        suffix_scores.reserve(target_capacity)
+    suffix_scores.clear()
+    suffix_scores.resize(cell_count, _UNREACHABLE)
+
+
+def _build_suffix_scores(
+    pattern: Pattern,
+    candidate: Span[UInt32, _],
+    bonuses: Span[Int, _],
+    mut suffix_scores: List[Int],
+) -> _MatchStart:
+    """Build the shared DP and return its optimal first position and score."""
     var pattern_count = len(pattern)
     var candidate_count = len(candidate)
-    if pattern_count > candidate_count:
-        return MatchResult.no_match()
-    var bonuses = _candidate_bonuses(candidate, scheme)
+    _reset_scores(suffix_scores, pattern_count * candidate_count)
 
-    var suffix_scores = List[Int](
-        length=pattern_count * candidate_count, fill=_UNREACHABLE
-    )
     var last_row_offset = (pattern_count - 1) * candidate_count
     for candidate_index in range(candidate_count):
         if (
@@ -120,41 +152,140 @@ def scalar_match(
             best_start = candidate_index
             best_total = total
 
-    if best_start < 0:
-        return MatchResult.no_match()
+    debug_assert(best_start >= 0, "subsequence prefilter guarantees a DP match")
+    return _MatchStart(best_start, best_total)
 
-    var positions = List[Int](length=pattern_count, fill=0)
-    positions[0] = best_start
-    for pattern_index in range(1, pattern_count):
+
+def _next_position(
+    pattern: Pattern,
+    candidate: Span[UInt32, _],
+    bonuses: Span[Int, _],
+    suffix_scores: List[Int],
+    pattern_index: Int,
+    previous: Int,
+) -> Int:
+    """Return the lexicographically first next position preserving the optimum."""
+    var candidate_count = len(candidate)
+    var required_suffix = suffix_scores[
+        (pattern_index - 1) * candidate_count + previous
+    ]
+    var row_offset = pattern_index * candidate_count
+    for candidate_index in range(previous + 1, candidate_count):
+        var suffix = suffix_scores[row_offset + candidate_index]
+        if (
+            suffix == _UNREACHABLE
+            or _candidate_match_scalar(candidate[candidate_index], pattern._fold_ascii)
+            != pattern._scalars[pattern_index]
+        ):
+            continue
+        if (
+            _transition(previous, candidate_index, bonuses[candidate_index]) + suffix
+            == required_suffix
+        ):
+            return candidate_index
+    debug_assert(False, "suffix DP must admit a reconstruction step")
+    return -1
+
+
+def _scalar_score_core(
+    pattern: Pattern,
+    candidate: Span[UInt32, _],
+    bonuses: Span[Int, _],
+    mut suffix_scores: List[Int],
+) -> MatchScore:
+    """Return an exact score while retaining all scratch and allocating no list."""
+    var best = _build_suffix_scores(pattern, candidate, bonuses, suffix_scores)
+    var previous = best.position
+    var exact_case = (
+        not pattern._fold_ascii or pattern._raw_scalars[0] == candidate[previous]
+    )
+    for pattern_index in range(1, len(pattern)):
+        previous = _next_position(
+            pattern,
+            candidate,
+            bonuses,
+            suffix_scores,
+            pattern_index,
+            previous,
+        )
+        if pattern._raw_scalars[pattern_index] != candidate[previous]:
+            exact_case = False
+    var score = best.score
+    if pattern._fold_ascii and exact_case:
+        score += _BONUS_EXACT_CASE
+    return MatchScore(True, score)
+
+
+def _scalar_match_into_core(
+    pattern: Pattern,
+    candidate: Span[UInt32, _],
+    bonuses: Span[Int, _],
+    mut suffix_scores: List[Int],
+    mut positions: List[Int],
+) -> MatchScore:
+    """Return the exact score and reconstruct into caller-owned storage."""
+    var best = _build_suffix_scores(pattern, candidate, bonuses, suffix_scores)
+    positions.clear()
+    positions.resize(len(pattern), 0)
+    positions[0] = best.position
+
+    for pattern_index in range(1, len(pattern)):
         var previous = positions[pattern_index - 1]
-        var required_suffix = suffix_scores[
-            (pattern_index - 1) * candidate_count + previous
-        ]
-        var found = False
-        var row_offset = pattern_index * candidate_count
-        for candidate_index in range(previous + 1, candidate_count):
-            var suffix = suffix_scores[row_offset + candidate_index]
-            if (
-                suffix == _UNREACHABLE
-                or _candidate_match_scalar(
-                    candidate[candidate_index], pattern._fold_ascii
-                )
-                != pattern._scalars[pattern_index]
-            ):
-                continue
-            if (
-                _transition(
-                    previous,
-                    candidate_index,
-                    bonuses[candidate_index],
-                )
-                + suffix
-                == required_suffix
-            ):
-                positions[pattern_index] = candidate_index
-                found = True
-                break
-        debug_assert(found, "suffix DP must admit a reconstruction step")
+        positions[pattern_index] = _next_position(
+            pattern,
+            candidate,
+            bonuses,
+            suffix_scores,
+            pattern_index,
+            previous,
+        )
 
-    best_total += _exact_case_score(pattern, candidate, positions)
-    return MatchResult(True, best_total, positions^)
+    return MatchScore(
+        True,
+        best.score + _exact_case_score(pattern, candidate, positions),
+    )
+
+
+def _scalar_match_core(
+    pattern: Pattern,
+    candidate: Span[UInt32, _],
+    bonuses: Span[Int, _],
+    mut suffix_scores: List[Int],
+) -> MatchResult:
+    """Run the shared DP and return an owned position list."""
+    var positions = List[Int]()
+    var score = _scalar_match_into_core(
+        pattern,
+        candidate,
+        bonuses,
+        suffix_scores,
+        positions,
+    )
+    return MatchResult(score.matched, score.score, positions^)
+
+
+def scalar_match(
+    pattern: Pattern,
+    candidate: Span[UInt32, _],
+    scheme: Scheme = Scheme.DEFAULT,
+) -> MatchResult:
+    """Return the best prepared-scalar subsequence match in ``O(P*C)`` time.
+
+    Backward dynamic-programming rows retain each optimal suffix score. A
+    forward greedy walk then chooses the first position that preserves that
+    optimum at every pattern index, yielding the lexicographically earliest
+    optimal position vector. Positions index the original candidate scalars.
+    """
+    if pattern.is_empty():
+        return MatchResult(True, 0, List[Int]())
+
+    if not _is_subsequence_match(pattern, candidate):
+        return MatchResult.no_match()
+    var bonuses = _candidate_bonuses(candidate, scheme)
+    var suffix_scores = List[Int]()
+    return _scalar_match_core(
+        pattern,
+        candidate,
+        bonuses,
+        suffix_scores,
+    )

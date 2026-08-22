@@ -29,6 +29,25 @@ and uses semantic versioning after the first public release.
   direct `List[String]` and bare-list-literal ranking ergonomics.
 - A deterministic path-ranking example that marks matched scalar positions.
 - A README honesty check that extracts and compiles every fenced Mojo program.
+- An opt-in `hibana.prepared` path that reuses decoded candidates, boundary
+  bonuses, and dynamic-programming workspace storage across incremental queries.
+- An allocation-free subsequence prefilter and reproducible `pixi run bench`
+  scalar/prepared comparison matrix.
+- Exact prepared scoring without owned position-result allocation through
+  `MatchWorkspace.score`; retained workspace scratch becomes allocation-free
+  after it has grown to the required dynamic-programming size.
+- Fixed-seed differential coverage for score-only and output-buffer matching,
+  plus benchmark variants isolating owned-result allocation and reconstruction.
+- Opt-in linear `fast_score` shortlist scoring with exact membership and no
+  position allocation.
+- Allocation-bounded hybrid corpus ranking with exact total counts, exact
+  finalist scores and positions, deterministic heaps, quality fixtures, and
+  10,000/100,000-candidate benchmarks.
+- Opt-in synchronous parallel exact ranking with coarse worker-local scoring,
+  deterministic source-index merging, serial fallback, and bounded heaps.
+- Arena-backed `PreparedCorpus` storage, indexed exact and fast scoring,
+  hybrid and parallel exact ranking, differential tests, memory profiling, and
+  31-sample p50/p95 benchmarks at 10,000 and 100,000 candidates.
 
 ### Changed
 

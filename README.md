@@ -175,12 +175,114 @@ practical. Build-time data generation may use another language when justified,
 but generated outputs must be deterministic, checksum-pinned, licensed, and
 documented.
 
+## Package
+
+The Mojo import is `hibana`. The eventual Conda distribution is
+`mojo-hibana`. Source lives under `src/hibana/`, whose
+`__init__.mojo` defines the package boundary.
+
+The public API ranks caller-owned candidates without buffering every match:
+
+```mojo
+from hibana import CaseMode, Matcher, Scheme
+from std.collections import List
+
+
+def main() raises:
+    var paths: List[String] = [
+        "src/hibana/matcher.mojo", "src/hibana/scoring.mojo",
+        "tests/test_basic.mojo", "README.md",
+    ]
+    var matcher = Matcher("hm", scheme=Scheme.PATH)  # Smart case is the default.
+    var ranked = matcher.rank(paths, k=5)
+    for item in ranked:
+        print(item.score, item.positions, paths[item.index])
+    _ = Matcher("HM", case_mode=CaseMode.EXACT, scheme=Scheme.PATH)  # Escape hatch.
+```
+
+`MatchResult` reports `matched`, a deterministic integer `score`, and
+zero-based Unicode scalar `positions`. Matching defaults to ASCII smart-case:
+queries containing an ASCII uppercase letter are exact, while other queries
+ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
+`Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching.
+`Matcher.match` is total and deterministic; a non-match is reported with
+`matched == false`. For pattern length `P` and candidate length `C`, the
+production path uses `O(P*C)` time and memory with no artificial resource
+limits. The bounded exhaustive dynamic program survives only as an internal
+test oracle and is not used by the production path.
+
+`Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
+positions into that span without copying it. `Matcher.rank` uses bounded
+`O(K)` storage and returns matches by score descending, then input index
+ascending. `TopK` exposes the same streaming policy when candidates do not
+already live in a single span.
+
+Interactive search loops that reuse the same candidates across changing
+queries can opt into the advanced API without enlarging the package root:
+
+```mojo
+from hibana import Pattern, Scheme
+from hibana.prepared import MatchWorkspace, PreparedCandidate
+
+
+def main():
+    var candidate = PreparedCandidate(
+        "src/hibana/matcher.mojo", scheme=Scheme.PATH
+    )
+    var workspace = MatchWorkspace()
+    var pattern = Pattern("hm")
+    var score = workspace.score(pattern, candidate)
+    if score.matched:
+        var positions = List[Int]()
+        _ = workspace.match_into(pattern, candidate, positions)
+        print(score.score, positions)
+```
+
+`PreparedCandidate` owns decoded Unicode scalars and boundary bonuses for one
+scheme. `MatchWorkspace` reuses its largest dynamic-programming allocation.
+`score` returns only exact match state and score, without allocating a position
+list. `match_into` reconstructs the same winning positions into caller-owned
+reusable storage. The convenience `match` retains the original owned-result
+behavior. A workspace is mutable and not thread-safe, so use one per matching
+loop or thread. Run `pixi run bench` for the scalar/prepared comparison matrix.
+
+Indexes large enough for per-candidate allocation overhead to matter can use
+`PreparedCorpus`, which stores decoded scalars and bonuses in contiguous arenas.
+It supports indexed exact scoring plus `hybrid_rank_corpus` and
+`rank_corpus_exact` without retaining source strings. See the
+[prepared-corpus API and profile evidence](docs/prepared-corpus.md).
+
+Large prepared indexes can additionally use the opt-in `hibana.fast` and
+`hibana.hybrid` modules. Hybrid ranking fast-scores the full corpus, exactly
+reranks a bounded shortlist, and reconstructs positions only for final rows.
+Its total match count and finalist scores/positions are exact, while shortlist
+selection is approximate. See [fast shortlist scoring](docs/fast-scoring.md)
+and the [hybrid ranking contract](docs/hybrid-ranking.md).
+
+Callers that require exact corpus ranking can opt into
+`hibana.parallel.rank_prepared_exact`. It splits independent candidates into
+coarse deterministic shards, score-only ranks in each worker, and reconstructs
+positions only for the final rows. The API remains synchronous and has a
+serial fallback; see the [parallel ranking contract](docs/parallel-ranking.md)
+for Mojo 1.0 task-runtime constraints.
+
+`Scheme.DEFAULT` rewards whitespace, common delimiters, word starts,
+camel-case, and number transitions. `Scheme.PATH` treats `/` and `\` as the
+strongest delimiters. Scores retain the 100-point match, 25-point adjacency,
+and one-point gap terms, and add fixed context and exact-case bonuses. See the
+[published scoring table](docs/scoring.md) for every constant, the closed-form
+formula, and the ranking-only exact-case rule.
+
+The exported structs are mutable Mojo value types. Matcher construction
+snapshots its canonical prepared pattern; caller mutation of a returned result
+changes that result value and is not revalidated by Hibana.
+
 ## Repository map
 
 - `src/hibana/`: library or application source
 - `tests/`: TestSuite unit, reference-value, and invariant tests
 - `examples/`: small compilable usage programs
-- `benchmarks/`: reproducible methodology and later benchmark programs
+- `benchmarks/`: reproducible methodology and executable benchmark programs
 - `docs/`: architecture, design, compatibility, roadmap, and release policy
 - `conda.recipe/`: local Rattler build recipe
 
