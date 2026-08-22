@@ -4,6 +4,44 @@ from std.collections import List
 from std.io import Writable, Writer
 
 
+struct MatchScore(Copyable, Equatable, Writable):
+    """Allocation-free match state and score without owned positions.
+
+    The advanced prepared-candidate API returns this value while scanning
+    candidates. A non-match and an empty-pattern match both score zero, so
+    callers must inspect ``matched`` to distinguish them.
+    """
+
+    var matched: Bool
+    var score: Int
+
+    def __init__(out self, matched: Bool, score: Int):
+        self.matched = matched
+        self.score = score
+
+    @staticmethod
+    def no_match() -> Self:
+        """Construct the canonical score-only non-match value."""
+        return Self(False, 0)
+
+    def __eq__(self, other: Self) -> Bool:
+        return self.matched == other.matched and self.score == other.score
+
+    def __str__(self) -> String:
+        var result = String()
+        self.write_to(result)
+        return result^
+
+    def write_to[W: Writer](self, mut writer: W):
+        writer.write(
+            "MatchScore(matched=",
+            self.matched,
+            ", score=",
+            self.score,
+            ")",
+        )
+
+
 struct MatchResult(Copyable, Equatable, Writable):
     """A mutable value containing one match attempt's output.
 

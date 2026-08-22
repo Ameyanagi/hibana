@@ -27,6 +27,14 @@ scalar must equal the corresponding raw pattern scalar. It is never awarded
 under `CaseMode.EXACT` or when smart-case degrades to exact matching. An empty
 pattern scores zero and receives no bonuses.
 
+## Multi-word queries
+
+`Matcher` string queries split on ASCII space, tab, LF, and CR into
+independently prepared atoms. Every atom must match. Each atom is scored from
+the same table and the final score is their sum; in particular, the exact-case
+ranking bonus is tested and applied independently per atom. Selected positions
+are merged, sorted, and deduplicated after scoring.
+
 ## Character classes
 
 Classes use an ASCII-only policy:

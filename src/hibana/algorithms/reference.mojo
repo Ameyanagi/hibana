@@ -29,14 +29,40 @@ def _checked_reference_cells(pattern_count: Int, candidate_count: Int) raises ->
     # arithmetic operations remain inside the deliberately conservative
     # interval before evaluating one.
     if pattern_count > (_SCORE_MAGNITUDE_LIMIT - 105) // 185:
-        raise Error("pattern exceeds the scalar reference score limit")
+        raise Error(
+            String(
+                "pattern length ",
+                pattern_count,
+                " exceeds the scalar reference score limit (max ",
+                (_SCORE_MAGNITUDE_LIMIT - 105) // 185,
+                " scalars)",
+            )
+        )
     if candidate_count > _SCORE_MAGNITUDE_LIMIT:
-        raise Error("candidate exceeds the scalar reference score limit")
+        raise Error(
+            String(
+                "candidate length ",
+                candidate_count,
+                " exceeds the scalar reference score limit (max ",
+                _SCORE_MAGNITUDE_LIMIT,
+                " scalars)",
+            )
+        )
 
     # Check division before multiplication so allocation and flattened indices
     # cannot overflow. Every later flattened index is strictly less than cells.
     if candidate_count > _MAX_REFERENCE_CELLS // pattern_count:
-        raise Error("match exceeds the scalar reference state-table limit")
+        raise Error(
+            String(
+                "pattern length ",
+                pattern_count,
+                " x candidate length ",
+                candidate_count,
+                " exceeds the scalar reference state-table limit (",
+                _MAX_REFERENCE_CELLS,
+                " cells)",
+            )
+        )
     var cells = pattern_count * candidate_count
 
     # The DP examines at most pattern_count * candidate_count^2 predecessor
@@ -45,10 +71,30 @@ def _checked_reference_cells(pattern_count: Int, candidate_count: Int) raises ->
     # estimate.
     if pattern_count > 1:
         if candidate_count > _MAX_REFERENCE_TRANSITIONS // cells:
-            raise Error("match exceeds the scalar reference transition limit")
+            raise Error(
+                String(
+                    "pattern length ",
+                    pattern_count,
+                    " with candidate length ",
+                    candidate_count,
+                    " exceeds the scalar reference transition limit (max ",
+                    _MAX_REFERENCE_TRANSITIONS,
+                    " transitions)",
+                )
+            )
         var transitions = cells * candidate_count
         if pattern_count > _MAX_REFERENCE_TIE_STEPS // transitions:
-            raise Error("match exceeds the scalar reference tie-break limit")
+            raise Error(
+                String(
+                    "pattern length ",
+                    pattern_count,
+                    " with candidate length ",
+                    candidate_count,
+                    " exceeds the scalar reference tie-break limit (max ",
+                    _MAX_REFERENCE_TIE_STEPS,
+                    " tie steps)",
+                )
+            )
     return cells
 
 

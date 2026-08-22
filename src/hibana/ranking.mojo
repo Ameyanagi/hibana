@@ -6,6 +6,11 @@ from std.io import Writable, Writer
 from .result import MatchResult
 
 
+struct _Validated:
+    def __init__(out self):
+        pass
+
+
 struct Ranked(Copyable, Equatable, Writable):
     """One retained match tied to its caller-owned input identity."""
 
@@ -87,11 +92,24 @@ struct TopK(Copyable):
                 String(
                     "TopK requires k >= 1, got ",
                     k,
-                    "; use match() for single-candidate checks",
+                    (
+                        "; construct TopK with the number of matches to retain, or use"
+                        " Matcher.rank without k to keep every match"
+                    ),
                 )
             )
         self._k = k
         self._heap = List[Ranked](capacity=k)
+
+    def __init__(out self, k: Int, *, _validated: _Validated):
+        """Create an empty heap from an already-validated positive ``k``."""
+        self._k = k
+        self._heap = List[Ranked](capacity=k)
+
+    @staticmethod
+    def _of_validated(k: Int) -> Self:
+        """Create an empty heap while trusting that ``k >= 1``."""
+        return Self(k, _validated=_Validated())
 
     def validate(self) raises:
         """Revalidate capacity and heap order after unusual caller mutation."""
@@ -100,15 +118,38 @@ struct TopK(Copyable):
                 String(
                     "TopK requires k >= 1, got ",
                     self._k,
-                    "; use match() for single-candidate checks",
+                    (
+                        "; construct TopK with the number of matches to retain, or use"
+                        " Matcher.rank without k to keep every match"
+                    ),
                 )
             )
         if len(self._heap) > self._k:
-            raise Error("TopK retained more than k results")
+            raise Error(
+                String(
+                    "TopK retained ",
+                    len(self._heap),
+                    " results but k is ",
+                    self._k,
+                    "; truncate the heap or rebuild with TopK(k)",
+                )
+            )
         for child in range(1, len(self._heap)):
             var parent = (child - 1) // 2
             if _is_worse(self._heap[child], self._heap[parent]):
-                raise Error("TopK storage does not satisfy root-worst heap order")
+                raise Error(
+                    String(
+                        "TopK heap order violated: child ",
+                        child,
+                        " = ",
+                        String(self._heap[child]),
+                        " is worse than parent ",
+                        parent,
+                        " = ",
+                        String(self._heap[parent]),
+                        "; rebuild the heap or undo the direct mutation",
+                    )
+                )
 
     def _swap(mut self, left: Int, right: Int):
         self._heap.swap_elements(left, right)
@@ -142,8 +183,9 @@ struct TopK(Copyable):
     def push(mut self, index: Int, var result: MatchResult):
         """Consume and consider one result, ignoring only non-matches.
 
-        ``matched == False`` results are ignored. An empty-pattern result has
-        ``matched == True`` and score zero, so it is retained and ranked.
+        ``matched == False`` results are ignored. An empty-pattern or
+        zero-atom query result has ``matched == True`` and score zero, so it is
+        retained and ranked.
         """
         if not result.matched:
             return
@@ -165,7 +207,8 @@ struct TopK(Copyable):
     def take_ranked(var self) -> List[Ranked]:
         """Return results and consume this heap's retained storage.
 
-        results sorted by score descending, ties broken by input index ascending — stable and deterministic.
+        Results are sorted by score descending, with ties broken by input index
+        ascending, so ordering is stable and deterministic.
         """
         var worst_first = List[Ranked](capacity=len(self._heap))
         while len(self._heap) > 0:

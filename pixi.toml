@@ -6,13 +6,19 @@ platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 version = "0.0.0"
 
 [tasks]
-check = { depends-on = ["format-check", "test", "precompile"], description = "Run the complete validation suite" }
+bench = { cmd = "bash scripts/benchmark-match.sh", description = "Benchmark scalar and prepared-candidate matching" }
+bench-fast = { cmd = "bash scripts/benchmark-focused.sh benchmarks/bench_fast.mojo bench-fast", description = "Benchmark allocation-free fast scoring over 10,000 candidates" }
+bench-hybrid = { cmd = "bash scripts/benchmark-focused.sh benchmarks/bench_hybrid.mojo bench-hybrid", description = "Benchmark hybrid ranking over 10,000 and 100,000 candidates" }
+bench-parallel = { cmd = "bash scripts/benchmark-focused.sh benchmarks/bench_parallel.mojo bench-parallel", description = "Benchmark serial and parallel exact prepared ranking at p50/p95" }
+profile-corpus = { cmd = "bash scripts/profile-corpus.sh", description = "Build and profile a 100,000-candidate corpus with macOS Time Profiler" }
+check = { depends-on = ["format-check", "test", "precompile", "readme-check"], description = "Run the complete validation suite" }
 example = { cmd = "mojo run -I src examples/basic.mojo", description = "Run the structural smoke example" }
 example-rank = { cmd = "mojo run -I src examples/rank_paths.mojo", description = "Rank paths and mark matched positions" }
 format = { cmd = "bash scripts/format.sh", description = "Format Mojo source files" }
 format-check = { cmd = "bash scripts/check-format.sh", description = "Verify Mojo formatting without modifying source" }
 package = { cmd = "rattler-build build --recipe conda.recipe/recipe.yaml -c conda-forge -c https://conda.modular.com/max -c https://repo.prefix.dev/modular-community", description = "Build the local Conda package" }
 precompile = { cmd = "mojo precompile --Werror --warn-on-unstable-apis src/hibana -o .pixi/hibana.mojoc", description = "Precompile the package with warnings as errors" }
+readme-check = { cmd = "bash scripts/check-readme.sh", description = "Compile every fenced mojo block in README.md" }
 test = { cmd = "bash scripts/test.sh", description = "Run all Mojo TestSuite files" }
 
 [dependencies]
