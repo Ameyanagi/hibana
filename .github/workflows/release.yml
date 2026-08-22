@@ -28,7 +28,9 @@ jobs:
           [[ "$(git rev-parse "${GITHUB_REF}^{commit}")" == "$GITHUB_SHA" ]]
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
           [[ "$(sed -n 's/^mojo = "\([^"]*\)"$/\1/p' pixi.toml)" == "==1.0.0" ]]
-          [[ "$(grep -c '^    - mojo-compiler =1.0.0$' conda.recipe/recipe.yaml)" -eq 3 ]]
+          exact_pins="$(grep -Ec '^    - mojo-compiler ==1\.0\.0$' conda.recipe/recipe.yaml)"
+          compiler_dependencies="$(grep -Ec '^[[:space:]]*- mojo-compiler([[:space:]]|$)' conda.recipe/recipe.yaml)"
+          [[ "$exact_pins" -eq 3 && "$compiler_dependencies" -eq 3 ]]
           grep -Fq "## [${workspace_version}] - " CHANGELOG.md
 
   check:
@@ -56,6 +58,7 @@ jobs:
           set -euo pipefail
           pixi run --locked check
           pixi run --locked package
+          bash scripts/check-package-metadata.sh
 
   publish:
     name: Publish source release
