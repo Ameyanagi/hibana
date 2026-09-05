@@ -127,18 +127,18 @@ Non-ASCII scalars always compare exactly, and
 `Matcher(Pattern("a b"))` as the single-atom escape hatch for a literal space.
 `Matcher.match` is exact and deterministic; a non-match is reported with
 `matched == false`. Exact computation raises for unrepresentable DP sizes or a
-configured workspace budget that is too small. For total atom length `P` and candidate length `C`, the
-production path uses `O(P*C)` time, with one atom's dynamic-programming storage
+configured workspace budget that is too small. For total atom length `P` and
+candidate length `C`, the production path uses `O(P*C)` time, with one atom's dynamic-programming storage
 live at a time. The default budget permits addressable DP storage; callers can
-choose a smaller explicit `WorkspaceBudget(max_cells=...)` for external input. The bounded exhaustive
-dynamic program survives only as an internal test oracle and is not used by
-the production path.
+choose a smaller explicit `WorkspaceBudget(max_cells=...)` for external input.
+The bounded exhaustive dynamic program survives only as an internal test oracle
+and is not used by the production path.
 
 `Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
-positions into that span without copying it. `Matcher.rank(candidates)` is a
-an all-matches operation; `Matcher.rank(candidates, k=K)` uses bounded
-`O(min(K, candidate_count))` ranking storage in addition to exact DP scratch. Both return matches by score descending, then input index
-ascending, and accept `List[String]` directly. `TopK` exposes the bounded
+positions into that span without copying it. `Matcher.rank(candidates)` is an
+all-matches operation; `Matcher.rank(candidates, k=K)` uses bounded
+`O(min(K, candidate_count))` ranking storage in addition to exact DP scratch.
+Both return matches by score descending, then input index ascending, and accept `List[String]` directly. `TopK` exposes the bounded
 streaming policy when candidates do not already live in a single span.
 See [workspace budgets](docs/workspace-budget.md) for configuration, errors,
 parallel peak-memory accounting, and the migration to raising exact methods.
@@ -214,10 +214,12 @@ ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
 `Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching.
 `Matcher.match` is exact and deterministic; a non-match is reported with
 `matched == false`. Exact computation raises for unrepresentable DP sizes or a
-configured workspace budget that is too small. For pattern length `P` and candidate length `C`, the
-production path uses `O(P*C)` time and memory with no artificial resource
-limits. The bounded exhaustive dynamic program survives only as an internal
-test oracle and is not used by the production path.
+configured workspace budget that is too small. For pattern length `P` and
+candidate length `C`, the production path uses `O(P*C)` time and memory.
+The default budget permits addressable DP storage; set an explicit
+`WorkspaceBudget(max_cells=...)` for a smaller application limit. The bounded
+exhaustive dynamic program survives only as an internal test oracle and is not
+used by the production path.
 
 `Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
 positions into that span without copying it. `Matcher.rank` uses bounded
