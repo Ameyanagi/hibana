@@ -41,7 +41,9 @@ deep-copies the scalar arena, bonus arena, and offset table. That independence
 is useful for snapshots but expensive for a large index. Pass a corpus as a
 borrowed argument or move it when another independent arena set is unnecessary.
 For indexed reconstruction, a valid `match_into_at` call clears the supplied
-position list for every outcome; an invalid index raises before changing it.
+position list for every outcome, including a workspace-budget error; an invalid
+index raises before changing it. `MatchWorkspace(budget=WorkspaceBudget(...))`
+bounds retained exact DP scratch; see [workspace budgets](workspace-budget.md).
 
 ## Profile evidence
 

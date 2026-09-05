@@ -8,6 +8,7 @@ from .algorithms.scalar import (
     _scalar_match_into_core,
     _scalar_score_core,
 )
+from .budget import WorkspaceBudget
 from .pattern import Pattern, _scalar_values
 from .result import MatchResult, MatchScore
 from .scoring import (
@@ -254,19 +255,29 @@ struct MatchWorkspace:
     A workspace is mutable, not thread-safe, and intended for one matching
     loop. Its retained suffix table grows to the largest successful ``P*C``
     match and is reused by later calls. Results own their position list and do
-    not borrow the workspace.
+    not borrow the workspace. ``budget`` caps retained score-table cells,
+    including geometric capacity growth. Exact operations raise before DP
+    allocation if dimensions overflow or exceed that budget; non-matches and
+    empty patterns still require no score cells. See ``docs/workspace-budget.md``
+    for memory exclusions and parallel shard accounting.
     """
 
     var _suffix_scores: List[Int]
+    var _budget: WorkspaceBudget
 
-    def __init__(out self):
+    def __init__(out self, *, budget: WorkspaceBudget = WorkspaceBudget()):
         self._suffix_scores = List[Int]()
+        self._budget = budget
+
+    def retained_cells(self) -> Int:
+        """Return current allocated DP capacity, at most the configured budget."""
+        return self._suffix_scores.capacity()
 
     def match(
         mut self,
         pattern: Pattern,
         candidate: PreparedCandidate,
-    ) -> MatchResult:
+    ) raises -> MatchResult:
         """Match prepared values, reusing scratch capacity when sufficient."""
         if pattern.is_empty():
             return MatchResult(True, 0, List[Int]())
@@ -277,13 +288,14 @@ struct MatchWorkspace:
             candidate._raw_scalars,
             candidate._bonuses,
             self._suffix_scores,
+            self._budget,
         )
 
     def score(
         mut self,
         pattern: Pattern,
         candidate: PreparedCandidate,
-    ) -> MatchScore:
+    ) raises -> MatchScore:
         """Return the exact match score without allocating owned positions.
 
         This performs the same dynamic program and tie-breaking as ``match``.
@@ -300,6 +312,7 @@ struct MatchWorkspace:
             candidate._raw_scalars,
             candidate._bonuses,
             self._suffix_scores,
+            self._budget,
         )
 
     def match_into(
@@ -307,7 +320,7 @@ struct MatchWorkspace:
         pattern: Pattern,
         candidate: PreparedCandidate,
         mut positions: List[Int],
-    ) -> MatchScore:
+    ) raises -> MatchScore:
         """Return the exact score and write positions into reusable storage.
 
         ``positions`` is cleared for every outcome. Successful non-empty
@@ -325,6 +338,7 @@ struct MatchWorkspace:
             candidate._bonuses,
             self._suffix_scores,
             positions,
+            self._budget,
         )
 
     def score_at(
@@ -342,7 +356,7 @@ struct MatchWorkspace:
         pattern: Pattern,
         corpus: PreparedCorpus,
         index: Int,
-    ) -> MatchScore:
+    ) raises -> MatchScore:
         """Score one corpus slot after bounds have been established."""
         var start = corpus._offsets[index]
         var end = corpus._offsets[index + 1]
@@ -356,6 +370,7 @@ struct MatchWorkspace:
             scalars,
             Span(corpus._bonuses)[start:end],
             self._suffix_scores,
+            self._budget,
         )
 
     def match_into_at(
@@ -380,7 +395,7 @@ struct MatchWorkspace:
         corpus: PreparedCorpus,
         index: Int,
         mut positions: List[Int],
-    ) -> MatchScore:
+    ) raises -> MatchScore:
         """Reconstruct one corpus slot after bounds have been established."""
         var start = corpus._offsets[index]
         var end = corpus._offsets[index + 1]
@@ -395,4 +410,5 @@ struct MatchWorkspace:
             Span(corpus._bonuses)[start:end],
             self._suffix_scores,
             positions,
+            self._budget,
         )

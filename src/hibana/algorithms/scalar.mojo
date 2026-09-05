@@ -2,6 +2,7 @@
 
 from std.collections import List
 
+from ..budget import WorkspaceBudget
 from ..pattern import Pattern
 from ..result import MatchResult, MatchScore
 from ..scoring import (
@@ -59,13 +60,13 @@ def _is_subsequence_match(
     return False
 
 
-def _reset_scores(mut suffix_scores: List[Int], cell_count: Int):
+def _reset_scores(mut suffix_scores: List[Int], cell_count: Int, max_cells: Int):
     """Reset logical workspace length while retaining its allocation."""
     if cell_count > suffix_scores.capacity():
         var target_capacity = cell_count
         if suffix_scores.capacity() <= Int.MAX // 2:
             target_capacity = max(cell_count, max(1, suffix_scores.capacity() * 2))
-        suffix_scores.reserve(target_capacity)
+        suffix_scores.reserve(min(target_capacity, max_cells))
     suffix_scores.clear()
     suffix_scores.resize(cell_count, _UNREACHABLE)
 
@@ -75,11 +76,13 @@ def _build_suffix_scores(
     candidate: Span[UInt32, _],
     bonuses: Span[Int, _],
     mut suffix_scores: List[Int],
-) -> _MatchStart:
+    budget: WorkspaceBudget,
+) raises -> _MatchStart:
     """Build the shared DP and return its optimal first position and score."""
     var pattern_count = len(pattern)
     var candidate_count = len(candidate)
-    _reset_scores(suffix_scores, pattern_count * candidate_count)
+    var required = budget._required_cells(pattern_count, candidate_count)
+    _reset_scores(suffix_scores, required, budget.max_cells())
 
     var last_row_offset = (pattern_count - 1) * candidate_count
     for candidate_index in range(candidate_count):
@@ -192,9 +195,10 @@ def _scalar_score_core(
     candidate: Span[UInt32, _],
     bonuses: Span[Int, _],
     mut suffix_scores: List[Int],
-) -> MatchScore:
+    budget: WorkspaceBudget,
+) raises -> MatchScore:
     """Return an exact score while retaining all scratch and allocating no list."""
-    var best = _build_suffix_scores(pattern, candidate, bonuses, suffix_scores)
+    var best = _build_suffix_scores(pattern, candidate, bonuses, suffix_scores, budget)
     var previous = best.position
     var exact_case = (
         not pattern._fold_ascii or pattern._raw_scalars[0] == candidate[previous]
@@ -222,9 +226,10 @@ def _scalar_match_into_core(
     bonuses: Span[Int, _],
     mut suffix_scores: List[Int],
     mut positions: List[Int],
-) -> MatchScore:
+    budget: WorkspaceBudget,
+) raises -> MatchScore:
     """Return the exact score and reconstruct into caller-owned storage."""
-    var best = _build_suffix_scores(pattern, candidate, bonuses, suffix_scores)
+    var best = _build_suffix_scores(pattern, candidate, bonuses, suffix_scores, budget)
     positions.clear()
     positions.resize(len(pattern), 0)
     positions[0] = best.position
@@ -251,7 +256,8 @@ def _scalar_match_core(
     candidate: Span[UInt32, _],
     bonuses: Span[Int, _],
     mut suffix_scores: List[Int],
-) -> MatchResult:
+    budget: WorkspaceBudget,
+) raises -> MatchResult:
     """Run the shared DP and return an owned position list."""
     var positions = List[Int]()
     var score = _scalar_match_into_core(
@@ -260,6 +266,7 @@ def _scalar_match_core(
         bonuses,
         suffix_scores,
         positions,
+        budget,
     )
     return MatchResult(score.matched, score.score, positions^)
 
@@ -268,7 +275,8 @@ def scalar_match(
     pattern: Pattern,
     candidate: Span[UInt32, _],
     scheme: Scheme = Scheme.DEFAULT,
-) -> MatchResult:
+    budget: WorkspaceBudget = WorkspaceBudget(),
+) raises -> MatchResult:
     """Return the best prepared-scalar subsequence match in ``O(P*C)`` time.
 
     Backward dynamic-programming rows retain each optimal suffix score. A
@@ -288,4 +296,5 @@ def scalar_match(
         candidate,
         bonuses,
         suffix_scores,
+        budget,
     )

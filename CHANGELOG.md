@@ -5,6 +5,28 @@ and uses semantic versioning after the first public release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clamp both `Matcher.rank(..., k)` heap capacities to available candidates;
+  empty inputs validate `k` and return without allocating a heap.
+
+### Added
+
+- `hibana.budget.WorkspaceBudget(max_cells=...)` checks DP dimension and byte
+  overflow before allocation and bounds retained scratch growth. Matcher,
+  prepared workspace, hybrid, and parallel entry points accept this budget.
+- Deterministic propagation of parallel workspace errors after joining tasks,
+  with worker score buffers freed before final-position reconstruction.
+
+### Changed
+
+- Exact `Matcher.match`, `match_scalars`, `rank`, and prepared `match`, `score`,
+  `match_into` now raise for checked resource failures. Forwarding call sites
+  must propagate or handle errors; ordinary default-budget results are unchanged.
+  `score_at` and `match_into_at` already raised for index errors and now also
+  report DP resource failures. See `docs/workspace-budget.md` for limits and
+  per-shard peak memory.
+
 ## [0.1.0] - 2026-08-22
 
 ### Added

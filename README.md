@@ -115,6 +115,11 @@ def main() raises:
 The Mojo import is `hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 
+Workspace budgets and the raising exact-method contract described below are
+**unreleased**. Use this source checkout and
+`pixi run --locked mojo run -I src your_file.mojo` for those APIs; the published
+`mojo-hibana` 0.1.0 package does not provide `WorkspaceBudget`.
+
 `MatchResult` reports `matched`, a deterministic integer `score`, and
 zero-based Unicode scalar `positions`. A string query is split into fuzzy words
 on ASCII space, tab, LF, and CR; every word must match, each word's score is
@@ -125,19 +130,23 @@ uppercase letter is exact, while other words ignore ASCII letter case.
 Non-ASCII scalars always compare exactly, and
 `Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching. Use
 `Matcher(Pattern("a b"))` as the single-atom escape hatch for a literal space.
-`Matcher.match` is total and deterministic; a non-match is reported with
-`matched == false`. For total atom length `P` and candidate length `C`, the
-production path uses `O(P*C)` time, with one atom's dynamic-programming storage
-live at a time and no artificial resource limits. The bounded exhaustive
-dynamic program survives only as an internal test oracle and is not used by
-the production path.
+`Matcher.match` is exact and deterministic; a non-match is reported with
+`matched == false`. Exact computation raises for unrepresentable DP sizes or a
+configured workspace budget that is too small. For total atom length `P` and
+candidate length `C`, the production path uses `O(P*C)` time, with one atom's dynamic-programming storage
+live at a time. The default budget permits addressable DP storage; callers can
+choose a smaller explicit `WorkspaceBudget(max_cells=...)` for external input.
+The bounded exhaustive dynamic program survives only as an internal test oracle
+and is not used by the production path.
 
 `Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
-positions into that span without copying it. `Matcher.rank(candidates)` is a
-non-raising all-matches operation; `Matcher.rank(candidates, k=K)` uses bounded
-`O(K)` storage. Both return matches by score descending, then input index
-ascending, and accept `List[String]` directly. `TopK` exposes the bounded
+positions into that span without copying it. `Matcher.rank(candidates)` is an
+all-matches operation; `Matcher.rank(candidates, k=K)` uses bounded
+`O(min(K, candidate_count))` ranking storage in addition to exact DP scratch.
+Both return matches by score descending, then input index ascending, and accept `List[String]` directly. `TopK` exposes the bounded
 streaming policy when candidates do not already live in a single span.
+See [workspace budgets](docs/workspace-budget.md) for configuration, errors,
+parallel peak-memory accounting, and the migration to raising exact methods.
 
 `Scheme.DEFAULT` rewards whitespace, common delimiters, word starts,
 camel-case, and number transitions. `Scheme.PATH` treats `/` and `\` as the
@@ -208,11 +217,14 @@ zero-based Unicode scalar `positions`. Matching defaults to ASCII smart-case:
 queries containing an ASCII uppercase letter are exact, while other queries
 ignore ASCII letter case. Non-ASCII scalars always compare exactly, and
 `Matcher("kmr", case_mode=CaseMode.EXACT)` restores exact-case matching.
-`Matcher.match` is total and deterministic; a non-match is reported with
-`matched == false`. For pattern length `P` and candidate length `C`, the
-production path uses `O(P*C)` time and memory with no artificial resource
-limits. The bounded exhaustive dynamic program survives only as an internal
-test oracle and is not used by the production path.
+`Matcher.match` is exact and deterministic; a non-match is reported with
+`matched == false`. Exact computation raises for unrepresentable DP sizes or a
+configured workspace budget that is too small. For pattern length `P` and
+candidate length `C`, the production path uses `O(P*C)` time and memory.
+The default budget permits addressable DP storage; set an explicit
+`WorkspaceBudget(max_cells=...)` for a smaller application limit. The bounded
+exhaustive dynamic program survives only as an internal test oracle and is not
+used by the production path.
 
 `Matcher.match_scalars` accepts caller-prepared Unicode scalars and returns
 positions into that span without copying it. `Matcher.rank` uses bounded
@@ -228,7 +240,7 @@ from hibana import Pattern, Scheme
 from hibana.prepared import MatchWorkspace, PreparedCandidate
 
 
-def main():
+def main() raises:
     var candidate = PreparedCandidate(
         "src/hibana/matcher.mojo", scheme=Scheme.PATH
     )

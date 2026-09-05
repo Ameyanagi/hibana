@@ -68,7 +68,12 @@ complexity.
 The production matcher first runs an allocation-free linear subsequence scan.
 Non-matches return before boundary preparation or `O(P*C)` scratch allocation.
 Successful prepared matches retain that scratch allocation in the caller's
-workspace and reset its logical contents on reuse. Score-only matching adds no
+workspace and reset its logical contents on reuse. Checked cell and byte counts
+reject overflow or the configured per-workspace budget before any DP allocation;
+geometric capacity growth stays within that budget. Exact resource failures
+propagate to the caller, including from parallel shards after all tasks join.
+See [workspace budgets](workspace-budget.md) for API migration and peak-memory
+accounting. Score-only matching adds no
 dynamic allocation after that workspace has grown. Caller-owned position
 storage similarly retains its capacity. The current DP still writes and scans
 `O(P*C)` score cells and traces positions with up to another `O(P*C)` scan;

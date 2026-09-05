@@ -53,7 +53,9 @@ def _is_better(left: Ranked, right: Ranked) -> Bool:
     )
 
 
-def _naive_rank(matcher: Matcher, candidates: List[String], k: Int) -> List[Ranked]:
+def _naive_rank(
+    matcher: Matcher, candidates: List[String], k: Int
+) raises -> List[Ranked]:
     var all_matches = List[Ranked]()
     for index in range(len(candidates)):
         var result = matcher.match(candidates[index])
@@ -241,6 +243,43 @@ def test_fixed_seed_rank_matches_naive_full_sort_oracle() raises:
         assert_equal(len(actual), len(expected))
         for index in range(len(actual)):
             assert_true(actual[index] == expected[index])
+
+
+def test_rank_clamps_unbounded_limit_for_empty_and_singleton_inputs() raises:
+    var matcher = Matcher("a")
+    var empty = List[String]()
+    assert_equal(len(matcher.rank(empty, Int.MAX)), 0)
+    assert_equal(len(matcher.rank(Span(empty), Int.MAX)), 0)
+    var singleton: List[String] = ["a"]
+    var expected = matcher.rank(singleton)
+    var from_list = matcher.rank(singleton, Int.MAX)
+    var from_span = matcher.rank(Span(singleton), Int.MAX)
+    assert_equal(len(from_list), 1)
+    assert_equal(len(from_span), 1)
+    assert_true(from_list[0] == expected[0])
+    assert_true(from_span[0] == expected[0])
+
+
+def test_rank_validates_limit_before_returning_empty_input() raises:
+    var empty = List[String]()
+    for k in [0, -1]:
+        with assert_raises(contains="rank requires k >= 1"):
+            _ = Matcher("a").rank(empty, k)
+        with assert_raises(contains="rank requires k >= 1"):
+            _ = Matcher("a").rank(Span(empty), k)
+
+
+def test_rank_clamped_limit_preserves_ties_in_both_overloads() raises:
+    var candidates: List[String] = ["xa", "ya", "za", "none"]
+    var matcher = Matcher("a", case_mode=CaseMode.EXACT)
+    var expected = matcher.rank(candidates)
+    var from_list = matcher.rank(candidates, Int.MAX)
+    var from_span = matcher.rank(Span(candidates), Int.MAX)
+    assert_equal(len(from_list), len(expected))
+    assert_equal(len(from_span), len(expected))
+    for index in range(len(expected)):
+        assert_true(from_list[index] == expected[index])
+        assert_true(from_span[index] == expected[index])
 
 
 def main() raises:

@@ -18,11 +18,13 @@ def _scalar_values(text: StringSlice) -> List[UInt32]:
     return values^
 
 
-def _rank_all(matcher: Matcher, candidates: List[String]) -> List[Ranked]:
+def _rank_all(matcher: Matcher, candidates: List[String]) raises -> List[Ranked]:
     return matcher.rank(candidates)
 
 
-def _rank_span_all(matcher: Matcher, candidates: Span[String, _]) -> List[Ranked]:
+def _rank_span_all(
+    matcher: Matcher, candidates: Span[String, _]
+) raises -> List[Ranked]:
     return matcher.rank(candidates)
 
 
