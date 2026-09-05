@@ -153,7 +153,11 @@ struct Matcher(Copyable):
                     "; omit k to rank every match",
                 )
             )
-        return self._rank_with_top_k(candidates, TopK._of_validated(k))
+        if len(candidates) == 0:
+            return List[Ranked]()
+        return self._rank_with_top_k(
+            candidates, TopK._of_validated(min(k, len(candidates)))
+        )
 
     def rank(self, candidates: List[String]) -> List[Ranked]:
         """Return every match from an owned list or bare list literal."""
@@ -169,4 +173,8 @@ struct Matcher(Copyable):
                     "; omit k to rank every match",
                 )
             )
-        return self._rank_with_top_k(candidates, TopK._of_validated(k))
+        if len(candidates) == 0:
+            return List[Ranked]()
+        return self._rank_with_top_k(
+            candidates, TopK._of_validated(min(k, len(candidates)))
+        )
