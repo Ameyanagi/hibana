@@ -23,7 +23,9 @@ and uses semantic versioning after the first public release.
 - Exact `Matcher.match`, `match_scalars`, `rank`, and prepared `match`, `score`,
   `match_into` now raise for checked resource failures. Forwarding call sites
   must propagate or handle errors; ordinary default-budget results are unchanged.
-  See `docs/workspace-budget.md` for limits and per-shard peak memory.
+  `score_at` and `match_into_at` already raised for index errors and now also
+  report DP resource failures. See `docs/workspace-budget.md` for limits and
+  per-shard peak memory.
 
 ## [0.1.0] - 2026-08-22
 

@@ -115,6 +115,11 @@ def main() raises:
 The Mojo import is `hibana`. Source lives under `src/hibana/`, whose
 `__init__.mojo` defines the package boundary.
 
+Workspace budgets and the raising exact-method contract described below are
+**unreleased**. Use this source checkout and
+`pixi run --locked mojo run -I src your_file.mojo` for those APIs; the published
+`mojo-hibana` 0.1.0 package does not provide `WorkspaceBudget`.
+
 `MatchResult` reports `matched`, a deterministic integer `score`, and
 zero-based Unicode scalar `positions`. A string query is split into fuzzy words
 on ASCII space, tab, LF, and CR; every word must match, each word's score is

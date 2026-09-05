@@ -1,5 +1,10 @@
 # Exact matching workspace budgets
 
+This API and its raising exact-method contract are **unreleased**. They require
+this source checkout; the published `mojo-hibana` 0.1.0 package does not expose
+`WorkspaceBudget`. Save the example below as `your_file.mojo` in the checkout
+and run `pixi run --locked mojo run -I src your_file.mojo`.
+
 `hibana.budget.WorkspaceBudget` bounds the retained dynamic-programming (DP)
 score table in one workspace. Each successful non-empty atom with `P` Unicode
 scalars against a candidate with `C` scalars requires `P * C` cells. A cell is
@@ -96,8 +101,10 @@ table at the same time.
 Exact computation now has an explicit failure contract. `Matcher.match`,
 `match_scalars`, both `rank` overload families, and `MatchWorkspace.match`,
 `score`, and `match_into` are `raises`. Mark forwarding functions `raises` or
-handle the error at an application boundary. The indexed, hybrid, and parallel
-entry points already raised and retain that calling convention. Constructors
+handle the error at an application boundary. `MatchWorkspace.score_at` and
+`match_into_at` already raised for invalid corpus indices; they now also report
+DP overflow/budget errors. The hybrid and parallel entry points also already
+raised and retain that calling convention. Constructors
 for matchers and workspaces remain non-raising when given a validated budget.
 
 Default-budget scores, positions, deterministic ties, and accepted ordinary
