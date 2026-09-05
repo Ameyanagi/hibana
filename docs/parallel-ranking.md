@@ -32,6 +32,14 @@ Unicode scalar positions.
 Scans below `grain_size` use the same exact kernel serially. The default grain
 is 4,096 candidates; benchmark the application corpus before changing it.
 
+Both exact ranking entry points accept `budget=WorkspaceBudget(max_cells=...)`
+from `hibana.budget`. This limit applies to each shard's retained DP table, so
+`W` shards can retain up to `W * budget.max_bytes()` score payload, with transient
+old-plus-new allocations during growth. Worker buffers are freed before final
+position reconstruction. Budget errors return synchronously after every task
+has joined; ranking never silently becomes approximate. See the full
+[workspace budget and peak-memory contract](workspace-budget.md).
+
 ## Mojo 1.0 runtime boundary
 
 This API uses the shipped `std.runtime.asyncrt.TaskGroup`. In Mojo 1.0 that

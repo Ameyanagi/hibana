@@ -3,6 +3,7 @@
 from std.collections import List
 
 from .algorithms.scalar import scalar_match
+from .budget import WorkspaceBudget
 from .pattern import CaseMode, Pattern, _scalar_values
 from .ranking import Ranked, TopK
 from .result import MatchResult
@@ -53,38 +54,47 @@ struct Matcher(Copyable):
     Scores follow the fixed table in ``docs/scoring.md``. A non-match and an
     empty or all-whitespace query match both score zero; inspect ``matched`` to
     distinguish them. Returned positions are Unicode scalar indices, not UTF-8
-    byte offsets.
+    byte offsets. ``budget`` limits each atom's DP table; exact execution raises
+    on unrepresentable cell/byte sizes or an exceeded budget. It never falls back
+    to approximate matching.
     """
 
     var _atoms: List[Pattern]
     var _scheme: Scheme
+    var _budget: WorkspaceBudget
 
     def __init__(
         out self,
         query: StringSlice,
         case_mode: CaseMode = CaseMode.SMART_ASCII,
         scheme: Scheme = Scheme.DEFAULT,
+        *,
+        budget: WorkspaceBudget = WorkspaceBudget(),
     ):
         """Split and prepare a whitespace-AND query for repeated matching."""
         self._atoms = _query_atoms(query, case_mode)
         self._scheme = scheme
+        self._budget = budget
 
     def __init__(
         out self,
         pattern: Pattern,
         scheme: Scheme = Scheme.DEFAULT,
+        *,
+        budget: WorkspaceBudget = WorkspaceBudget(),
     ):
         """Build a single-atom matcher without splitting pattern whitespace."""
         self._atoms = List[Pattern]()
         self._atoms.append(pattern.copy())
         self._scheme = scheme
+        self._budget = budget
 
-    def match(self, candidate: StringSlice) -> MatchResult:
+    def match(self, candidate: StringSlice) raises -> MatchResult:
         """Decode once and AND every prepared atom over the same scalars."""
         var candidate_scalars = _scalar_values(candidate)
         return self.match_scalars(candidate_scalars)
 
-    def match_scalars(self, candidate: Span[UInt32, _]) -> MatchResult:
+    def match_scalars(self, candidate: Span[UInt32, _]) raises -> MatchResult:
         """AND every atom over caller-prepared scalars without copying them.
 
         Positions are Unicode scalar indices into the caller's span, not byte
@@ -94,12 +104,12 @@ struct Matcher(Copyable):
         if len(self._atoms) == 0:
             return MatchResult(True, 0, List[Int]())
         if len(self._atoms) == 1:
-            return scalar_match(self._atoms[0], candidate, self._scheme)
+            return scalar_match(self._atoms[0], candidate, self._scheme, self._budget)
 
         var score = 0
         var selected = List[Bool](length=len(candidate), fill=False)
         for atom in self._atoms:
-            var result = scalar_match(atom, candidate, self._scheme)
+            var result = scalar_match(atom, candidate, self._scheme, self._budget)
             if not result.matched:
                 return MatchResult.no_match()
             score += result.score
@@ -116,22 +126,22 @@ struct Matcher(Copyable):
         self,
         candidates: Span[String, _],
         var top_k: TopK,
-    ) -> List[Ranked]:
+    ) raises -> List[Ranked]:
         for index in range(len(candidates)):
             var result = self.match(candidates[index])
             top_k.push(index, result^)
         return top_k^.take_ranked()
 
-    def _rank_all(self, candidates: Span[String, _]) -> List[Ranked]:
+    def _rank_all(self, candidates: Span[String, _]) raises -> List[Ranked]:
         if len(candidates) == 0:
             return List[Ranked]()
         return self._rank_with_top_k(candidates, TopK._of_validated(len(candidates)))
 
-    def rank(self, candidates: Span[String, _]) -> List[Ranked]:
+    def rank(self, candidates: Span[String, _]) raises -> List[Ranked]:
         """Return every match by descending score, then ascending index.
 
-        This all-matches overload is non-raising. Pass ``k`` to retain only the
-        best bounded subset.
+        Pass ``k`` to retain only the best bounded subset. Exact DP raises if
+        its dimensions overflow or exceed this matcher's workspace budget.
         """
         return self._rank_all(candidates)
 
@@ -142,8 +152,8 @@ struct Matcher(Copyable):
     ) raises -> List[Ranked]:
         """Return at most ``k`` matches by descending score, then index.
 
-        ``k`` must be at least one. Omit it for every match through the
-        non-raising overload.
+        ``k`` must be at least one. Omit it for every match. Internal heap
+        capacity is capped at the number of candidates.
         """
         if k < 1:
             raise Error(
@@ -159,7 +169,7 @@ struct Matcher(Copyable):
             candidates, TopK._of_validated(min(k, len(candidates)))
         )
 
-    def rank(self, candidates: List[String]) -> List[Ranked]:
+    def rank(self, candidates: List[String]) raises -> List[Ranked]:
         """Return every match from an owned list or bare list literal."""
         return self._rank_all(candidates)
 

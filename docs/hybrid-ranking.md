@@ -68,3 +68,11 @@ pixi run bench-hybrid
 The benchmark performs three warmups followed by 31 measured samples and
 reports nearest-rank p50 and p95. Its checksum includes the exact total plus
 every finalist index, score, and Unicode scalar position.
+
+## Exact workspace limits
+
+Both hybrid entry points accept `budget=WorkspaceBudget(max_cells=...)` from
+`hibana.budget`. The bound applies to the one reusable exact reranking workspace.
+A shortlisted candidate that exceeds it raises with required and allowed sizes;
+it is not silently dropped or given an approximate score. See the
+[workspace budget contract](workspace-budget.md) for memory exclusions and errors.

@@ -1,7 +1,7 @@
 from hibana import Matcher
 
 
-def main():
+def main() raises:
     var matcher = Matcher("kmr")
     var result = matcher.match("kamera")
 

@@ -4,6 +4,7 @@ from std.collections import List
 from std.math import ceildiv
 from std.runtime.asyncrt import TaskGroup, parallelism_level
 
+from .budget import WorkspaceBudget
 from .pattern import Pattern
 from .prepared import MatchWorkspace, PreparedCandidate, PreparedCorpus
 
@@ -165,11 +166,13 @@ struct _ShardState:
     var workspace: MatchWorkspace
     var top_k: _ScoreTopK
     var total_matches: Int
+    var error_message: Optional[String]
 
-    def __init__(out self, k: Int):
-        self.workspace = MatchWorkspace()
+    def __init__(out self, k: Int, budget: WorkspaceBudget):
+        self.workspace = MatchWorkspace(budget=budget)
         self.top_k = _ScoreTopK(k)
         self.total_matches = 0
+        self.error_message = Optional[String]()
 
 
 def _scan_shard(
@@ -178,7 +181,7 @@ def _scan_shard(
     mut state: _ShardState,
     start: Int,
     end: Int,
-):
+) raises:
     for source_index in range(start, end):
         var result = state.workspace.score(pattern, candidates[source_index])
         if result.matched:
@@ -193,7 +196,10 @@ async def _scan_shard_task(
     start: Int,
     end: Int,
 ):
-    _scan_shard(pattern, candidates, state_slot[0], start, end)
+    try:
+        _scan_shard(pattern, candidates, state_slot[0], start, end)
+    except error:
+        state_slot[0].error_message = String(error)
 
 
 def _scan_corpus_shard(
@@ -202,7 +208,7 @@ def _scan_corpus_shard(
     mut state: _ShardState,
     start: Int,
     end: Int,
-):
+) raises:
     for source_index in range(start, end):
         var result = state.workspace._score_at_unchecked(pattern, corpus, source_index)
         if result.matched:
@@ -217,7 +223,10 @@ async def _scan_corpus_shard_task(
     start: Int,
     end: Int,
 ):
-    _scan_corpus_shard(pattern, corpus, state_slot[0], start, end)
+    try:
+        _scan_corpus_shard(pattern, corpus, state_slot[0], start, end)
+    except error:
+        state_slot[0].error_message = String(error)
 
 
 def _shard_bounds(item_count: Int, shard_count: Int, shard: Int) -> Tuple[Int, Int]:
@@ -233,6 +242,7 @@ def _rank_prepared_exact_with_worker_limit(
     k: Int,
     grain_size: Int,
     worker_limit: Int,
+    budget: WorkspaceBudget = WorkspaceBudget(),
 ) raises -> ParallelRankPage:
     """Internal implementation with an injectable maximum worker count."""
     debug_assert(worker_limit >= 1, "worker limit must be positive")
@@ -258,7 +268,7 @@ def _rank_prepared_exact_with_worker_limit(
     )
     var states = List[_ShardState](capacity=shard_count)
     for _ in range(shard_count):
-        states.append(_ShardState(effective_k))
+        states.append(_ShardState(effective_k, budget))
 
     if shard_count == 1:
         _scan_shard(pattern, candidates, states[0], 0, len(candidates))
@@ -278,15 +288,22 @@ def _rank_prepared_exact_with_worker_limit(
             )
         group.wait()
 
+    # Worker failures are reported synchronously after every task has joined.
+    # Fixed shard order makes the selected error deterministic.
+    for shard in range(shard_count):
+        if states[shard].error_message:
+            raise Error(states[shard].error_message.value())
     var total_matches = 0
     var merged = _ScoreTopK(effective_k)
     for shard in range(shard_count):
         total_matches += states[shard].total_matches
         states[shard].top_k.merge_into(merged)
 
+    # Drop retained worker DP buffers before the reconstruction workspace grows.
+    states.clear()
     var scored = merged^.take_ranked()
     var rows = List[ParallelRanked](capacity=len(scored))
-    var workspace = MatchWorkspace()
+    var workspace = MatchWorkspace(budget=budget)
     for ranked_index in range(len(scored)):
         var positions = List[Int](capacity=len(pattern))
         var score = workspace.match_into(
@@ -311,6 +328,8 @@ def rank_prepared_exact(
     pattern: Pattern,
     k: Int = 20,
     grain_size: Int = 4_096,
+    *,
+    budget: WorkspaceBudget = WorkspaceBudget(),
 ) raises -> ParallelRankPage:
     """Rank prepared candidates exactly with bounded worker-local storage.
 
@@ -320,7 +339,10 @@ def rank_prepared_exact(
     candidate. Every match is counted before ``k`` truncation. Workers allocate
     no match-position results while scanning; each worker-local workspace may
     allocate or grow dynamic-programming scratch, then reuses that capacity.
-    Exact positions are reconstructed only for the final rows.
+    Exact positions are reconstructed only for the final rows. ``budget`` caps
+    each workspace's retained DP cells; W shards can retain W times its byte
+    limit. Worker buffers are freed before final reconstruction. Errors are
+    raised after every task joins; no partial or approximate page is returned.
 
     This synchronous opt-in API uses one flat ``TaskGroup``. Do not call it
     from a Mojo async-runtime task or move its active task group. Use the serial
@@ -333,6 +355,7 @@ def rank_prepared_exact(
         k,
         grain_size,
         max(parallelism_level(), 1),
+        budget,
     )
 
 
@@ -342,6 +365,7 @@ def _rank_corpus_exact_with_worker_limit(
     k: Int,
     grain_size: Int,
     worker_limit: Int,
+    budget: WorkspaceBudget = WorkspaceBudget(),
 ) raises -> ParallelRankPage:
     """Internal arena ranking with an injectable maximum worker count."""
     debug_assert(worker_limit >= 1, "worker limit must be positive")
@@ -361,7 +385,7 @@ def _rank_corpus_exact_with_worker_limit(
     var shard_count = min(worker_limit, ceildiv(len(corpus), grain_size))
     var states = List[_ShardState](capacity=shard_count)
     for _ in range(shard_count):
-        states.append(_ShardState(effective_k))
+        states.append(_ShardState(effective_k, budget))
 
     if shard_count == 1:
         _scan_corpus_shard(pattern, corpus, states[0], 0, len(corpus))
@@ -381,15 +405,22 @@ def _rank_corpus_exact_with_worker_limit(
             )
         group.wait()
 
+    # Worker failures are reported synchronously after every task has joined.
+    # Fixed shard order makes the selected error deterministic.
+    for shard in range(shard_count):
+        if states[shard].error_message:
+            raise Error(states[shard].error_message.value())
     var total_matches = 0
     var merged = _ScoreTopK(effective_k)
     for shard in range(shard_count):
         total_matches += states[shard].total_matches
         states[shard].top_k.merge_into(merged)
 
+    # Drop retained worker DP buffers before the reconstruction workspace grows.
+    states.clear()
     var scored = merged^.take_ranked()
     var rows = List[ParallelRanked](capacity=len(scored))
-    var workspace = MatchWorkspace()
+    var workspace = MatchWorkspace(budget=budget)
     for ranked_index in range(len(scored)):
         var positions = List[Int](capacity=len(pattern))
         var score = workspace._match_into_at_unchecked(
@@ -415,6 +446,8 @@ def rank_corpus_exact(
     pattern: Pattern,
     k: Int = 20,
     grain_size: Int = 4_096,
+    *,
+    budget: WorkspaceBudget = WorkspaceBudget(),
 ) raises -> ParallelRankPage:
     """Rank an arena-backed corpus exactly and deterministically.
 
@@ -429,4 +462,5 @@ def rank_corpus_exact(
         k,
         grain_size,
         max(parallelism_level(), 1),
+        budget,
     )

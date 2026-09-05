@@ -2,6 +2,7 @@
 
 from std.collections import List
 
+from .budget import WorkspaceBudget
 from .fast import _fast_score_at_unchecked, fast_score
 from .pattern import Pattern
 from .prepared import MatchWorkspace, PreparedCandidate, PreparedCorpus
@@ -130,6 +131,7 @@ def hybrid_rank(
     *,
     k: Int,
     shortlist_size: Int = 1_000,
+    budget: WorkspaceBudget = WorkspaceBudget(),
 ) raises -> HybridRankResult:
     """Rank prepared candidates with bounded allocation and exact finalists.
 
@@ -196,7 +198,7 @@ def hybrid_rank(
     var shortlist = fast_top^.take_entries()
     var effective_k = max(1, min(k, len(shortlist)))
     var exact_top = _ScoreTopK(effective_k)
-    var workspace = MatchWorkspace()
+    var workspace = MatchWorkspace(budget=budget)
     for entry in shortlist:
         var score = workspace.score(pattern, candidates[entry.index])
         debug_assert(score.matched, "fast and exact membership must agree")
@@ -220,6 +222,7 @@ def hybrid_rank_corpus(
     *,
     k: Int,
     shortlist_size: Int = 1_000,
+    budget: WorkspaceBudget = WorkspaceBudget(),
 ) raises -> HybridRankResult:
     """Rank an arena-backed corpus with the same hybrid contract.
 
@@ -269,7 +272,7 @@ def hybrid_rank_corpus(
     var shortlist = fast_top^.take_entries()
     var effective_k = max(1, min(k, len(shortlist)))
     var exact_top = _ScoreTopK(effective_k)
-    var workspace = MatchWorkspace()
+    var workspace = MatchWorkspace(budget=budget)
     for entry in shortlist:
         var score = workspace._score_at_unchecked(pattern, corpus, entry.index)
         debug_assert(score.matched, "fast and exact membership must agree")

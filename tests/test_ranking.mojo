@@ -53,7 +53,9 @@ def _is_better(left: Ranked, right: Ranked) -> Bool:
     )
 
 
-def _naive_rank(matcher: Matcher, candidates: List[String], k: Int) -> List[Ranked]:
+def _naive_rank(
+    matcher: Matcher, candidates: List[String], k: Int
+) raises -> List[Ranked]:
     var all_matches = List[Ranked]()
     for index in range(len(candidates)):
         var result = matcher.match(candidates[index])
